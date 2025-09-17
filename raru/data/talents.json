@@ -1,0 +1,43 @@
+{
+  "talents": [
+    {
+      "id": 1,
+      "name_ja": "アベックスター",
+      "name_en": "Avec Star",
+      "slug": "avec-star",
+      "image": "/images/20240614-151354_HD.jpg",
+      "mv_images": [
+        "/images/avecstar_1.jpg",
+        "/images/avecstar_2.jpg",
+        "/images/avecstar_3.jpg",
+        "/images/avecstar_4.jpg"
+      ],
+      "profile": "モデル、俳優として活動中。",
+      "instagram": "https://www.instagram.com/avec_star/",
+      "tiktok": "https://www.tiktok.com/@avec891",
+      "birthdate": "1999年5月17日",
+      "birthplace": "東京都",
+      "height": "170cm",
+      "hobby": "フリースタイルバスケ、筋トレ",
+      "skill": "動画撮影/編集、エンジニア",
+      "history": [
+        {
+          "year": "2023年3月",
+          "event": "IFBCフリースタイルバスケ全国大会ベスト16"
+        },
+        {
+          "year": "2022年9月",
+          "event": "＠YUMAHOUSE フリースタイルバスケのコーチアシスタントとして出演"
+        },
+        {
+          "year": "2025年",
+          "event": "SONY バスケットボール選手役出演"
+        },
+        {
+          "year": "2025年",
+          "event": "大塚製薬ポカリスエット　バスケ部と合唱部篇　バスケ部員役エキストラ"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,65 @@
+/* Navigation Styles */
+.sju-nav {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  background-color: #fff;
+  z-index: 10;
+  padding: 8px 16px;
+  height: 96px; /* Default height for mobile */
+}
+
+.sju-nav-inner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  height: 100%;
+}
+
+.sju-wrapper {
+  padding-top: 96px; /* Match the nav height */
+}
+
+/* PC Styles */
+@media all and (min-width: 1024px) {
+  .sju-nav {
+    width: 232px; /* Width of the sidebar */
+    height: 100%;
+    padding: 56px 32px;
+  }
+
+  .sju-wrapper {
+    padding-top: 0;
+    margin-left: 232px; /* Match the nav width */
+  }
+
+  /* Sub-page layout */
+  .sub-page .sju-nav-inner {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .sub-page .sju-nav-brand {
+    margin-bottom: 24px; /* Space between logo and menu */
+  }
+
+  /* Home-page layout */
+  .home-page .sju-nav-inner {
+    flex-direction: row;
+    align-items: center;
+  }
+
+  .home-page .sju-nav.is-absolute .sju-nav-main {
+    padding-left: 0;
+  }
+
+  .home-page .sju-nav {
+    padding-left: 24px;
+  }
+
+  .home-page .sju-nav-brand {
+    width: 160px;
+  }
+}
