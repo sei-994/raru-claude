@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>News - RARU Official</title>
+    <meta name="description" content="RARUのニュース - 最新の活動情報、出演情報、実績">
+    <link rel="canonical" href="https://www.raru-official.jp/news">
+    
+    <!-- フォント読み込み -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500&family=Noto+Serif+JP:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://p.typekit.net/p.css?s=1&k=lbp4mob&ht=tk&f=10294.10300.10302&a=10694841&app=typekit&e=css">
+    
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- サイドバー -->
+    <aside class="sidebar">
+        <div class="sidebar-content">
+            <h1 class="sidebar-logo">
+                <a href="index.html">
+                    <img src="raru/public/images/raru-logo.png" alt="RARU Official" class="logo-img">
+                </a>
+            </h1>
+            <nav class="sidebar-nav">
+                <ul class="sidebar-menu">
+                    <li><a href="index.html" class="sidebar-link">Home</a></li>
+                    <li><a href="talents.html" class="sidebar-link">Talents</a></li>
+                    <li><a href="news.html" class="sidebar-link active">News</a></li>
+                    <li><a href="contact.html" class="sidebar-link">Contact</a></li>
+                </ul>
+            </nav>
+        </div>
+    </aside>
+
+    <!-- メインコンテンツ -->
+    <main class="main-content">
+        
+        <!-- ページヘッダー -->
+        <section class="page-header">
+            <div class="container">
+                <div class="page-header-content">
+                    <h1 class="page-title">Latest News</h1>
+                    <p class="page-subtitle">RARUの最新活動情報</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- ニュース一覧 -->
+        <section class="section news-listing">
+            <div class="container">
+                <div class="news-filter fade-in">
+                    <div class="filter-tabs">
+                        <button class="filter-tab active" data-category="all">Company News</button>
+                    </div>
+                </div>
+
+                <div class="news-grid">
+                    <article class="news-article fade-in" data-category="achievements">
+                        <div class="news-image">
+                            <img src="raru/public/images/about/about_mv_01.jpeg" alt="RARU設立">
+                        </div>
+                        <div class="news-content">
+                            <div class="news-meta">
+                                <span class="news-date">2025年</span>
+                                <span class="news-author">RARU Official</span>
+                            </div>
+                            <h3 class="news-title">RARU Official 正式設立</h3>
+                            <p class="news-excerpt">
+                                タレントエージェンシーRARU Officialが正式に設立されました。
+                                次世代を担う才能豊かなクリエイターやタレントを発掘し、
+                                彼らの可能性を最大限に引き出すサポートを提供してまいります。
+                            </p>
+                            <div class="news-tags">
+                                <a href="#" class="news-tag">#RARU</a>
+                                <a href="#" class="news-tag">#設立</a>
+                                <a href="#" class="news-tag">#タレントエージェンシー</a>
+                            </div>
+                        </div>
+                    </article>
+                </div>
+
+                <div class="load-more-section fade-in">
+                    <button class="load-more-btn">Load More News</button>
+                </div>
+            </div>
+        </section>
+
+        <!-- ニュースレター購読 -->
+        <section class="section newsletter-section">
+            <div class="container">
+                <div class="newsletter-content fade-in">
+                    <div class="newsletter-info">
+                        <h2 class="newsletter-title">Stay Updated</h2>
+                        <p class="newsletter-description">
+                            RARUの最新ニュースを見逃さないよう、
+                            メールマガジンにご登録ください。
+                        </p>
+                    </div>
+                    <div class="newsletter-form">
+                        <form class="subscription-form">
+                            <div class="form-group">
+                                <input type="email" class="newsletter-input" placeholder="your@email.com" required>
+                                <button type="submit" class="newsletter-btn">Subscribe</button>
+                            </div>
+                            <p class="form-note">
+                                配信停止はいつでも可能です。プライバシーポリシーに同意の上ご登録ください。
+                            </p>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <script src="script.js"></script>
+</body>
+</html>
