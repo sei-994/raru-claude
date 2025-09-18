@@ -143,10 +143,11 @@ body {
   left: 0;
   width: 100%;
   height: 100%;
-  background: rgba(0, 0, 0, 0.5);
+  background: linear-gradient(135deg, rgba(0, 0, 0, 0.7) 0%, rgba(0, 0, 0, 0.5) 100%);
+  backdrop-filter: blur(10px);
   z-index: 999;
   opacity: 0;
-  transition: opacity 0.3s ease;
+  transition: all 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
 }
 
 .sidebar-overlay.active {
@@ -584,10 +585,12 @@ body {
   /* サイドバーを非表示にして、アクティブ時のみ表示 */
   .sidebar {
     transform: translateX(-100%);
+    box-shadow: 0 0 50px rgba(0, 0, 0, 0.3);
   }
   
   .sidebar.active {
     transform: translateX(0);
+    box-shadow: 0 0 50px rgba(0, 0, 0, 0.4);
   }
   
   /* メインコンテンツの調整 */
