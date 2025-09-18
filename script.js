@@ -476,6 +476,68 @@ class NewsFilter {
   }
 }
 
+// ハンバーガーメニュークラス
+class HamburgerMenu {
+  constructor() {
+    this.hamburgerBtn = document.getElementById('hamburgerBtn');
+    this.sidebar = document.getElementById('sidebar');
+    this.overlay = document.getElementById('sidebarOverlay');
+    this.init();
+  }
+  
+  init() {
+    if (!this.hamburgerBtn || !this.sidebar || !this.overlay) return;
+    
+    // ハンバーガーボタンクリック
+    this.hamburgerBtn.addEventListener('click', () => {
+      this.toggleMenu();
+    });
+    
+    // オーバーレイクリック（メニューを閉じる）
+    this.overlay.addEventListener('click', () => {
+      this.closeMenu();
+    });
+    
+    // メニューリンククリック時にメニューを閉じる
+    const sidebarLinks = this.sidebar.querySelectorAll('.sidebar-link');
+    sidebarLinks.forEach(link => {
+      link.addEventListener('click', () => {
+        this.closeMenu();
+      });
+    });
+    
+    // ESCキーでメニューを閉じる
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        this.closeMenu();
+      }
+    });
+  }
+  
+  toggleMenu() {
+    const isActive = this.sidebar.classList.contains('active');
+    if (isActive) {
+      this.closeMenu();
+    } else {
+      this.openMenu();
+    }
+  }
+  
+  openMenu() {
+    this.hamburgerBtn.classList.add('active');
+    this.sidebar.classList.add('active');
+    this.overlay.classList.add('active');
+    document.body.style.overflow = 'hidden'; // スクロール無効
+  }
+  
+  closeMenu() {
+    this.hamburgerBtn.classList.remove('active');
+    this.sidebar.classList.remove('active');
+    this.overlay.classList.remove('active');
+    document.body.style.overflow = ''; // スクロール有効
+  }
+}
+
 // メイン初期化クラス
 class RARUWebsite {
   constructor() {
@@ -497,6 +559,7 @@ class RARUWebsite {
       // 各コンポーネントを初期化
       this.components.push(new SmoothScroller());
       this.components.push(new ScrollEffects());
+      this.components.push(new HamburgerMenu());
       
       // クイズとグラデーントは存在する場合のみ
       if (document.querySelector('.quiz-option')) {
