@@ -801,7 +801,11 @@ class ContactForm {
     };
 
     try {
-      const response = await fetch('/raru/api/contact', {
+      // 本番環境とローカル開発環境を判定
+      const isProduction = window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1';
+      const apiUrl = isProduction ? '/api/contact' : 'http://localhost:3000/api/contact';
+
+      const response = await fetch(apiUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
