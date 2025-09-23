@@ -23,7 +23,7 @@ export default async function handler(req, res) {
 
     const mailOptions = {
       from: email,
-      to: 'raru.official.info@gmail.com',
+      to: 'raru.info.official@gmail.com',
       subject: `【お問い合わせ】${type} - ${lastName} ${firstName}様`,
       html: `
         <h2>お問い合わせ内容</h2>

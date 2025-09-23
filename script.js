@@ -761,6 +761,107 @@ class HeroSlideshow {
   }
 }
 
+// お問い合わせフォーム処理
+class ContactForm {
+  constructor() {
+    this.form = document.getElementById('contactForm');
+    if (this.form) {
+      this.init();
+    }
+  }
+
+  init() {
+    this.form.addEventListener('submit', (e) => this.handleSubmit(e));
+  }
+
+  async handleSubmit(e) {
+    e.preventDefault();
+
+    const submitBtn = this.form.querySelector('.submit-btn');
+    const btnText = submitBtn.querySelector('.btn-text');
+    const btnSpinner = submitBtn.querySelector('.btn-spinner');
+
+    // ボタンを無効化
+    submitBtn.disabled = true;
+    btnText.style.display = 'none';
+    btnSpinner.style.display = 'inline';
+
+    // フォームデータを収集
+    const formData = new FormData(this.form);
+    const data = {
+      type: formData.get('inquiryType'),
+      talent: '', // 静的HTMLフォームには希望タレント欄がないため空に
+      lastName: '', // 静的HTMLでは fullName で一つになっているため分割
+      firstName: formData.get('fullName'),
+      company: formData.get('companyName'),
+      email: formData.get('email'),
+      phone: formData.get('phone') || '',
+      url: '', // 静的HTMLフォームにはURL欄がないため空に
+      message: formData.get('message')
+    };
+
+    try {
+      const response = await fetch('/raru/api/contact', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(data)
+      });
+
+      if (response.ok) {
+        this.showMessage('お問い合わせが正常に送信されました。48時間以内にご返信いたします。', 'success');
+        this.form.reset();
+      } else {
+        const errorData = await response.json();
+        this.showMessage(`送信に失敗しました: ${errorData.error || '不明なエラー'}`, 'error');
+      }
+    } catch (error) {
+      console.error('フォーム送信エラー:', error);
+      this.showMessage('送信中にエラーが発生しました。ネットワーク接続を確認してください。', 'error');
+    } finally {
+      // ボタンを元に戻す
+      submitBtn.disabled = false;
+      btnText.style.display = 'inline';
+      btnSpinner.style.display = 'none';
+    }
+  }
+
+  showMessage(text, type) {
+    // 既存のメッセージを削除
+    const existingMessage = this.form.querySelector('.form-message');
+    if (existingMessage) {
+      existingMessage.remove();
+    }
+
+    // 新しいメッセージを作成
+    const messageDiv = document.createElement('div');
+    messageDiv.className = `form-message ${type}`;
+    messageDiv.textContent = text;
+
+    // スタイルを追加
+    messageDiv.style.cssText = `
+      margin-top: 1rem;
+      padding: 1rem;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      ${type === 'success' ?
+        'background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb;' :
+        'background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb;'
+      }
+    `;
+
+    // フォームの最後に追加
+    this.form.appendChild(messageDiv);
+
+    // 3秒後にメッセージを削除
+    setTimeout(() => {
+      messageDiv.remove();
+    }, 5000);
+  }
+}
+
 // メインアプリケーション開始
 const raruWebsite = new RARUWebsite();
 const heroSlideshow = new HeroSlideshow();
+const contactForm = new ContactForm();
