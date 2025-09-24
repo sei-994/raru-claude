@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Contact - RARU Official</title>
+    <meta name="description" content="RARUへのお問い合わせ - キャスティング依頼、タレント応募、各種ご相談">
+    <link rel="canonical" href="https://www.raru-official.jp/contact">
+    
+    <!-- フォント読み込み -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500&family=Noto+Serif+JP:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://p.typekit.net/p.css?s=1&k=lbp4mob&ht=tk&f=10294.10300.10302&a=10694841&app=typekit&e=css">
+    
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- ハンバーガーメニューボタン (モバイル用) -->
+    <button class="hamburger-btn" id="hamburgerBtn">
+        <span class="hamburger-line"></span>
+        <span class="hamburger-line"></span>
+        <span class="hamburger-line"></span>
+    </button>
+
+    <!-- サイドバーオーバーレイ (モバイル用) -->
+    <div class="sidebar-overlay" id="sidebarOverlay"></div>
+
+    <!-- サイドバー -->
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar-content">
+            <h1 class="sidebar-logo">
+                <a href="index.html">
+                    <img src="raru/public/images/raru-logo.png" alt="RARU Official" class="logo-img">
+                </a>
+            </h1>
+            <nav class="sidebar-nav">
+                <ul class="sidebar-menu">
+                    <li><a href="index.html" class="sidebar-link">Home</a></li>
+                    <li><a href="talents.html" class="sidebar-link">Talents</a></li>
+                    <li><a href="news.html" class="sidebar-link">News</a></li>
+                    <li><a href="contact.html" class="sidebar-link active">Contact</a></li>
+                </ul>
+            </nav>
+        </div>
+    </aside>
+
+    <!-- メインコンテンツ -->
+    <main class="main-content">
+        
+        <!-- ページヘッダー -->
+        <section class="page-header">
+            <div class="container">
+                <div class="page-header-content">
+                    <h1 class="page-title">Contact Us</h1>
+                    <p class="page-subtitle">お気軽にお問い合わせください</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- お問い合わせフォーム -->
+        <section class="section contact-form-section">
+            <div class="container">
+                <div class="contact-form-centered fade-in">
+                    <form class="inquiry-form" id="contactForm">
+                        <div class="form-header">
+                            <h3 class="form-title">お問い合わせフォーム</h3>
+                            <p class="form-description">キャスティング依頼・タレント応募・その他のお問い合わせはこちらから</p>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="inquiryType" class="form-label">お問い合わせ種別 <span class="required">*</span></label>
+                            <select id="inquiryType" name="inquiryType" class="form-select" required>
+                                <option value="">選択してください</option>
+                                <option value="casting">キャスティング依頼</option>
+                                <option value="audition">タレント応募</option>
+                                <option value="collaboration">コラボレーション</option>
+                                <option value="media">メディア掲載</option>
+                                <option value="other">その他</option>
+                            </select>
+                        </div>
+                        
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="companyName" class="form-label">会社名・団体名</label>
+                                <input type="text" id="companyName" name="companyName" class="form-input" placeholder="株式会社〇〇">
+                            </div>
+                            <div class="form-group">
+                                <label for="fullName" class="form-label">お名前 <span class="required">*</span></label>
+                                <input type="text" id="fullName" name="fullName" class="form-input" placeholder="山田太郎" required>
+                            </div>
+                        </div>
+                        
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="email" class="form-label">メールアドレス <span class="required">*</span></label>
+                                <input type="email" id="email" name="email" class="form-input" placeholder="your@email.com" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="phone" class="form-label">電話番号</label>
+                                <input type="tel" id="phone" name="phone" class="form-input" placeholder="090-1234-5678">
+                            </div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="subject" class="form-label">件名 <span class="required">*</span></label>
+                            <input type="text" id="subject" name="subject" class="form-input" placeholder="お問い合わせの件名をご記入ください" required>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="message" class="form-label">お問い合わせ内容 <span class="required">*</span></label>
+                            <textarea id="message" name="message" class="form-textarea" rows="6" placeholder="詳細なご要望、ご質問をお書きください。キャスティングのご依頼の場合は、企画内容、撮影時期、予算などもご記載いただけますとスムーズです。" required></textarea>
+                        </div>
+                        
+                        <div class="form-group checkbox-group">
+                            <label class="checkbox-label">
+                                <input type="checkbox" name="privacy" required>
+                                <span class="checkmark"></span>
+                                <a href="#" class="privacy-link">プライバシーポリシー</a>に同意します
+                            </label>
+                        </div>
+                        
+                        <div class="form-actions">
+                            <button type="submit" class="submit-btn">
+                                <span class="btn-text">送信する</span>
+                                <span class="btn-spinner" style="display: none;">送信中...</span>
+                            </button>
+                            <p class="form-note">
+                                送信後、48時間以内にご返信いたします。<br>
+                                Email: raru.info.official@gmail.com
+                            </p>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <script src="script.js"></script>
+</body>
+</html>

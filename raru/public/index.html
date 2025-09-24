@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RARU</title>
+    <meta name="description" content="「私らしさ」は、円を描く。今をときめくZ世代のプロダクション＆メディア">
+    <link rel="canonical" href="https://www.raru-official.jp">
+    
+    <!-- フォント読み込み -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500&family=Noto+Serif+JP:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://p.typekit.net/p.css?s=1&k=lbp4mob&ht=tk&f=10294.10300.10302&a=10694841&app=typekit&e=css">
+    
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- ハンバーガーメニューボタン (モバイル用) -->
+    <button class="hamburger-btn" id="hamburgerBtn">
+        <span class="hamburger-line"></span>
+        <span class="hamburger-line"></span>
+        <span class="hamburger-line"></span>
+    </button>
+
+    <!-- サイドバーオーバーレイ (モバイル用) -->
+    <div class="sidebar-overlay" id="sidebarOverlay"></div>
+
+    <!-- サイドバー -->
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar-content">
+            <h1 class="sidebar-logo">
+                <a href="index.html">
+                    <img src="raru/public/images/raru-logo.png" alt="RARU Official" class="logo-img">
+                </a>
+            </h1>
+            <nav class="sidebar-nav">
+                <ul class="sidebar-menu">
+                    <li><a href="index.html" class="sidebar-link active">Home</a></li>
+                    <li><a href="talents.html" class="sidebar-link">Talents</a></li>
+                    <li><a href="news.html" class="sidebar-link">News</a></li>
+                    <li><a href="contact.html" class="sidebar-link">Contact</a></li>
+                </ul>
+            </nav>
+        </div>
+    </aside>
+
+    <!-- メインコンテンツ -->
+    <main class="main-content">
+        
+        <!-- ヒーローセクション -->
+        <section class="hero hero-slideshow-section">
+            <div class="hero-slideshow">
+                <div class="hero-slide active" style="background-image: url('raru/public/images/about/about_mv_01.jpeg')"></div>
+                <div class="hero-slide" style="background-image: url('raru/public/images/about/about_mv_02.jpg')"></div>
+                <div class="hero-slide" style="background-image: url('raru/public/images/about/about_mv_03.jpeg')"></div>
+                <div class="hero-slide" style="background-image: url('raru/public/images/about/about_mv_04.jpg')"></div>
+                <div class="slideshow-overlay"></div>
+            </div>
+            <div class="hero-container">
+                <div class="hero-content">
+                    <h1 class="hero-title">RARU</h1>
+                    <p class="hero-subtitle">次世代のタレントを輩出する</p>
+                    <p class="hero-description">エンターテインメント業界に革新をもたらすクリエイティブエージェンシー</p>
+                    <div class="hero-buttons">
+                        <a href="talents.html" class="hero-btn primary">Discover Talents</a>
+                    </div>
+                </div>
+            </div>
+            <div class="slideshow-indicators">
+                <span class="indicator active" data-slide="0"></span>
+                <span class="indicator" data-slide="1"></span>
+                <span class="indicator" data-slide="2"></span>
+                <span class="indicator" data-slide="3"></span>
+            </div>
+        </section>
+
+        <!-- コンセプトセクション -->
+        <section id="concept" class="section concept-section">
+            <div class="container">
+                <h2 class="section-title">About</h2>
+                <div class="concept-grid">
+                    <div class="concept-text">
+                        <p class="concept-description">
+                            RARUは、才能あふれるクリエイターやタレントを発掘し、<br>
+                            彼らの可能性を最大限に引き出すためのサポートを提供しています。<br>
+                            モデル、俳優、インフルエンサーなど、多様な分野で活躍する人材を育成し、<br>
+                            エンターテインメント業界に新たな価値を創造しています。
+                        </p>
+                    </div>
+                    <div class="concept-visual">
+                        <div class="custom-illustration concept-art">
+                            <div class="ripple-circle"></div>
+                            <div class="ripple-circle"></div>
+                            <div class="ripple-circle"></div>
+                            <div class="floating-note">★</div>
+                            <div class="floating-note">✦</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+
+
+        <!-- ニュースセクション -->
+        <section id="news" class="section news-section">
+            <div class="container">
+                <h2 class="section-title">News</h2>
+                <div class="news-grid">
+                    <a href="news.html" class="news-card-link">
+                        <article class="news-card">
+                            <div class="news-icon">
+                                <div class="custom-illustration news-art">
+                                    <div class="news-badge"></div>
+                                </div>
+                            </div>
+                            <div class="news-content">
+                                <div class="news-date">2025</div>
+                                <h3 class="news-title">RARU Official 正式設立</h3>
+                                <p class="news-excerpt">タレントエージェンシーRARU Officialが正式に設立されました。次世代を担う才能豊かなクリエイターやタレントを発掘し、彼らの可能性を最大限に引き出すサポートを提供してまいります。</p>
+                            </div>
+                        </article>
+                    </a>
+                </div>
+            </div>
+        </section>
+
+        <!-- メッセージセクション -->
+        <section id="message" class="section message-section">
+            <div class="container">
+                <h2 class="section-title">Contact</h2>
+                <div class="message-content">
+                    <div class="message-illustration">
+                        <div class="custom-illustration message-art">
+                            <div class="heart-large"></div>
+                            <div class="star-twinkle"></div>
+                            <div class="star-twinkle"></div>
+                            <div class="star-twinkle"></div>
+                        </div>
+                    </div>
+                    <blockquote class="fan-message">
+                        新しい才能の発掘と育成に情熱を注いでいます。<br>
+                        モデル、俳優、インフルエンサーとしての活動をお考えの方、<br>
+                        または私たちのタレントへのお仕事のご依頼がございましたら、<br>
+                        お気軽にお問い合わせください。<br><br>
+                        一緒にエンターテインメント業界を盛り上げていきましょう。
+                        <cite>— RARU スタッフ一同</cite>
+                    </blockquote>
+                </div>
+            </div>
+        </section>
+
+
+    </main>
+
+    <!-- フッター -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-bottom">
+                <p>&copy; 2025 RARU Official. All rights reserved.</p>
+            </div>
+        </div>
+    </footer>
+
+    <script src="script.js"></script>
+</body>
+</html>
