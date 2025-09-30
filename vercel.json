@@ -1,6 +1,18 @@
 {
   "builds": [
     {
+      "src": "*.html",
+      "use": "@vercel/static"
+    },
+    {
+      "src": "*.css",
+      "use": "@vercel/static"
+    },
+    {
+      "src": "*.js",
+      "use": "@vercel/static"
+    },
+    {
       "src": "raru/package.json",
       "use": "@vercel/next"
     }
@@ -11,8 +23,12 @@
       "dest": "/raru/api/$1"
     },
     {
-      "src": "/(.*)",
+      "src": "/raru/(.*)",
       "dest": "/raru/$1"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/$1"
     }
   ]
 }
