@@ -2,16 +2,17 @@
   "builds": [
     {
       "src": "raru/package.json",
-      "use": "@vercel/next",
-      "config": {
-        "rootDirectory": "raru"
-      }
+      "use": "@vercel/next"
     }
   ],
-  "rewrites": [
+  "routes": [
     {
-      "source": "/(.*)",
-      "destination": "/raru/$1"
+      "src": "/api/(.*)",
+      "dest": "/raru/api/$1"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/raru/$1"
     }
   ]
 }
