@@ -788,33 +788,21 @@ class ContactForm {
 
     // フォームデータを収集
     const formData = new FormData(this.form);
-    const data = {
-      type: formData.get('inquiryType'),
-      talent: '', // 静的HTMLフォームには希望タレント欄がないため空に
-      lastName: '', // 静的HTMLでは fullName で一つになっているため分割
-      firstName: formData.get('fullName'),
-      company: formData.get('companyName'),
-      email: formData.get('email'),
-      phone: formData.get('phone') || '',
-      url: '', // 静的HTMLフォームにはURL欄がないため空に
-      message: formData.get('message')
-    };
 
     try {
-      const response = await fetch('/api/contact', {
+      const response = await fetch(this.form.action, {
         method: 'POST',
+        body: formData,
         headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(data)
+          'Accept': 'application/json'
+        }
       });
 
       if (response.ok) {
         this.showMessage('お問い合わせが正常に送信されました。48時間以内にご返信いたします。', 'success');
         this.form.reset();
       } else {
-        const errorData = await response.json();
-        this.showMessage(`送信に失敗しました: ${errorData.error || '不明なエラー'}`, 'error');
+        this.showMessage('送信に失敗しました。再度お試しください。', 'error');
       }
     } catch (error) {
       console.error('フォーム送信エラー:', error);
