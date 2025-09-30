@@ -788,17 +788,28 @@ class ContactForm {
 
     // フォームデータを収集
     const formData = new FormData(this.form);
+    const templateParams = {
+      inquiry_type: formData.get('inquiry_type'),
+      company_name: formData.get('company_name') || '',
+      full_name: formData.get('full_name'),
+      email: formData.get('email'),
+      phone: formData.get('phone') || '',
+      subject: formData.get('subject'),
+      message: formData.get('message'),
+      to_email: 'raru.info.official@gmail.com'
+    };
 
     try {
-      const response = await fetch(this.form.action, {
-        method: 'POST',
-        body: formData,
-        headers: {
-          'Accept': 'application/json'
-        }
-      });
+      // EmailJS初期化
+      emailjs.init('YOUR_PUBLIC_KEY'); // 実際のキーに置き換え必要
 
-      if (response.ok) {
+      const result = await emailjs.send(
+        'YOUR_SERVICE_ID', // 実際のサービスIDに置き換え必要
+        'YOUR_TEMPLATE_ID', // 実際のテンプレートIDに置き換え必要
+        templateParams
+      );
+
+      if (result.text === 'OK') {
         this.showMessage('お問い合わせが正常に送信されました。48時間以内にご返信いたします。', 'success');
         this.form.reset();
       } else {
@@ -806,7 +817,22 @@ class ContactForm {
       }
     } catch (error) {
       console.error('フォーム送信エラー:', error);
-      this.showMessage('送信中にエラーが発生しました。ネットワーク接続を確認してください。', 'error');
+      // EmailJSが利用できない場合のフォールバック
+      const subject = encodeURIComponent(`【お問い合わせ】${templateParams.inquiry_type} - ${templateParams.full_name}様`);
+      const body = encodeURIComponent(`
+お問い合わせ種別: ${templateParams.inquiry_type}
+お名前: ${templateParams.full_name}
+会社名: ${templateParams.company_name}
+メールアドレス: ${templateParams.email}
+電話番号: ${templateParams.phone}
+件名: ${templateParams.subject}
+
+お問い合わせ内容:
+${templateParams.message}
+      `);
+
+      window.location.href = `mailto:raru.info.official@gmail.com?subject=${subject}&body=${body}`;
+      this.showMessage('メールアプリが開きます。お使いのメールアプリから送信してください。', 'success');
     } finally {
       // ボタンを元に戻す
       submitBtn.disabled = false;
