@@ -7,11 +7,11 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: '実行モード（初回は raw で構造確認、find-parts で品番探索）'
+        description: '実行モード（初回は doctor で自己診断、find-parts で品番探索）'
         required: false
         default: 'check'
         type: choice
-        options: [check, raw, find-parts, test]
+        options: [check, doctor, raw, find-parts, test]
 
 permissions:
   contents: read
@@ -51,6 +51,7 @@ jobs:
           REPEAT_MIN: ${{ vars.REPEAT_MIN || '60' }}
         run: |
           case "${{ inputs.mode || 'check' }}" in
+            doctor)     node tools/stock-watcher/apple-stock.js --doctor ;;
             raw)        node tools/stock-watcher/apple-stock.js --raw ;;
             find-parts) node tools/stock-watcher/apple-stock.js --find-parts ;;
             test)       node tools/stock-watcher/apple-stock.js --test ;;
@@ -66,7 +67,7 @@ jobs:
           if-no-files-found: ignore
 
       - name: 状態を保存
-        if: always() && inputs.mode != 'raw' && inputs.mode != 'find-parts'
+        if: always() && inputs.mode != 'raw' && inputs.mode != 'find-parts' && inputs.mode != 'doctor'
         uses: actions/cache/save@v4
         with:
           path: tools/stock-watcher/apple-state.json

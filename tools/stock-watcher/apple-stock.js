@@ -4,6 +4,7 @@
  *
  * 依存ゼロ (Node 18+ の global fetch)
  *
+ *   node apple-stock.js --doctor              設定から通知まで一気通貫で自己診断（まずこれ）
  *   node apple-stock.js --find-parts 256      購入ページから品番(MXXXXJ/A)を探す
  *   node apple-stock.js --raw                 生JSONを保存して構造を確認する
  *   node apple-stock.js --check               1回チェック
@@ -13,6 +14,25 @@
 
 const fs = require('fs');
 const path = require('path');
+
+/** 同じディレクトリの .env を読む。実際の環境変数が優先される。 */
+function loadEnvFile() {
+  const f = process.env.ENV_FILE || path.join(__dirname, '.env');
+  if (!fs.existsSync(f)) return null;
+  for (const line of fs.readFileSync(f, 'utf8').split('\n')) {
+    const m = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/);
+    if (!m || line.trim().startsWith('#')) continue;
+    let v = m[2].trim();
+    if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
+      v = v.slice(1, -1);
+    } else {
+      v = v.replace(/\s+#.*$/, '').trim();   // 行末コメントを除去
+    }
+    if (process.env[m[1]] === undefined) process.env[m[1]] = v;
+  }
+  return f;
+}
+const ENV_FILE_USED = loadEnvFile();
 
 const CFG = {
   region: process.env.APPLE_REGION || 'jp',          // 'jp' / 'us'(空文字) など
@@ -71,6 +91,7 @@ async function getJson(url) {
   if (!res.ok) {
     const hint = res.status === 541 ? ' — このエンドポイントは現在ブロックされている可能性があります'
                : res.status === 403 ? ' — UA/Referer 拒否、またはレート制限の可能性'
+               : res.status === 429 ? ' — レート制限。間隔を空けてください'
                : '';
     throw Object.assign(new Error(`HTTP ${res.status}${hint}`), { status: res.status, body: text.slice(0, 400) });
   }
@@ -365,6 +386,160 @@ async function raw() {
   }
 }
 
+// ------------------------------------------------------------------ doctor
+// 設定から実際の通知までを一気通貫で自己診断し、次にやることを指示する。
+async function doctor() {
+  const problems = [], warns = [];
+  const line = () => console.log('-'.repeat(72));
+
+  console.log('='.repeat(72));
+  console.log('Apple 在庫監視 セルフチェック');
+  console.log('='.repeat(72));
+  console.log('設定ファイル :', ENV_FILE_USED || '(.env なし。環境変数から読み込み)');
+  console.log('地域         :', CFG.region, `(${BASE})`);
+  console.log('品番         :', CFG.parts.join(', ') || '(未設定)');
+  console.log('地点         :', CFG.locations.join(' / ') || '(未設定)');
+  console.log('店舗フィルタ :', CFG.storeFilter.join(' / ') || '(絞り込みなし)');
+  console.log('監視間隔     :', CFG.intervalSec + '秒');
+
+  if (!CFG.parts.length) problems.push('APPLE_PARTS が未設定です（--find-parts で品番を調べてください）');
+  if (!CFG.locations.length) problems.push('APPLE_LOCATION が未設定です');
+  if (problems.length) return verdict(problems, warns);
+
+  // --- 1. 各地点への問い合わせ -------------------------------------------
+  line();
+  console.log('[1/4] 各地点に問い合わせ中...');
+  let results;
+  try {
+    results = await fetchAllLocations();
+  } catch (e) {
+    console.log('\n  ✗ 全地点で失敗しました:\n' + e.message.split('\n').map(l => '    ' + l).join('\n'));
+    problems.push('Apple のエンドポイントに到達できません。'
+      + '\n      541 なら APPLE_ENDPOINTS を変更、403 なら間隔を空けるかブラウザのCookieが必要です。'
+      + '\n      どうしても駄目なら check.js（is-checker.com 版）に切り替えてください。');
+    return verdict(problems, warns);
+  }
+  if (results.length < CFG.locations.length) {
+    warns.push(`${CFG.locations.length - results.length}件の地点で取得に失敗しました（残りで継続します）`);
+  }
+
+  const perLocation = results.map(r => ({
+    loc: r.location,
+    rows: extractPickup(r.json),
+  }));
+  for (const { loc, rows } of perLocation) {
+    const names = [...new Set(rows.map(r => r.store))];
+    console.log(`  ${loc} → ${names.length}店舗: ${names.join(', ') || '(なし)'}`);
+  }
+
+  const all = mergeRows(results);
+  if (!all.length) {
+    problems.push('店舗情報を1件も抽出できませんでした。apple-raw.json を確認してください'
+      + '（--raw で保存されます）。品番や地域(APPLE_REGION)の指定ミスが多いです。');
+    return verdict(problems, warns);
+  }
+
+  // --- 2. 品番のカバレッジ ------------------------------------------------
+  line();
+  console.log('[2/4] 品番の確認');
+  const seenParts = new Set(all.map(r => r.part));
+  for (const part of CFG.parts) {
+    const ok = seenParts.has(part);
+    console.log(`  ${ok ? '✓' : '✗'} ${part}${ok ? '' : '  ← 結果に出てきません。品番が誤っている可能性'}`);
+    if (!ok) problems.push(`品番 ${part} が Apple 側の応答に出てきません。--find-parts で調べ直してください`);
+  }
+  const extra = [...seenParts].filter(p => !CFG.parts.includes(p));
+  if (extra.length) warns.push('指定していない品番も返ってきています: ' + extra.join(', '));
+
+  // --- 3. 店舗フィルタ ----------------------------------------------------
+  line();
+  console.log('[3/4] 監視対象の店舗');
+  const kept = applyStoreFilter(all);
+  const keptStores = [...new Set(kept.map(r => r.store))];
+  if (!kept.length) {
+    console.log('  ✗ 0件');
+    problems.push('STORE_FILTER がどの店舗にも一致しません。上の店舗名の表記に合わせてください'
+      + '（フィルタを空にすれば全店舗が対象になります）');
+  } else {
+    keptStores.forEach(n => console.log(`  ✓ ${n}`));
+    for (const f of CFG.storeFilter) {
+      if (!keptStores.some(n => n.toLowerCase().includes(f.toLowerCase()))) {
+        warns.push(`店舗フィルタ "${f}" に一致する店舗が返ってきていません。地点(APPLE_LOCATION)を見直してください`);
+      }
+    }
+    const inNow = kept.filter(isInStock);
+    console.log(`\n  現在の在庫: ${inNow.length}件` +
+      (inNow.length ? ' → ' + inNow.map(r => r.store).join(', ') : '（すべて在庫なし＝監視の出発点として正常）'));
+  }
+
+  // --- 4. 地点の最小セット ------------------------------------------------
+  if (kept.length && perLocation.length > 1) {
+    const sets = perLocation.map(pl => ({
+      loc: pl.loc,
+      stores: new Set(applyStoreFilter(pl.rows).map(r => r.store)),
+    }));
+    const target = new Set(keptStores);
+    const covered = new Set(), chosen = [];
+    while (covered.size < target.size) {
+      let best = null, gain = 0;
+      for (const st of sets) {
+        if (chosen.includes(st.loc)) continue;
+        const g = [...st.stores].filter(x => target.has(x) && !covered.has(x)).length;
+        if (g > gain) { gain = g; best = st; }
+      }
+      if (!best) break;
+      chosen.push(best.loc);
+      best.stores.forEach(x => { if (target.has(x)) covered.add(x); });
+    }
+    if (chosen.length && chosen.length < CFG.locations.length) {
+      warns.push(`地点は ${chosen.join(',')} の${chosen.length}つで同じ店舗を全部カバーできます。`
+        + `\n      APPLE_LOCATION を減らすとリクエスト数が ${CFG.locations.length}→${chosen.length} になり、`
+        + `403やIP遮断のリスクが下がります。`);
+    }
+  }
+
+  // --- 5. Discord --------------------------------------------------------
+  line();
+  console.log('[4/4] Discord');
+  if (!CFG.webhook) {
+    problems.push('DISCORD_WEBHOOK_URL が未設定です。これがないと通知が飛びません');
+    console.log('  ✗ 未設定');
+  } else if (CFG.dryRun) {
+    console.log('  - DRY_RUN=1 のため送信をスキップしました');
+    warns.push('DRY_RUN=1 が有効です。本番監視の前に外してください');
+  } else {
+    await notify(`✅ セルフチェック (${ts()})\n` +
+      `品番: \`${CFG.parts.join(', ')}\`\n` +
+      `監視店舗: ${keptStores.join(', ') || '(なし)'}`);
+    console.log('  ✓ テスト通知を送信しました。Discord に届いたか確認してください');
+  }
+
+  verdict(problems, warns);
+}
+
+function verdict(problems, warns) {
+  console.log('\n' + '='.repeat(72));
+  if (warns.length) {
+    console.log('警告:');
+    warns.forEach(w => console.log('  ! ' + w));
+    console.log('');
+  }
+  if (problems.length) {
+    console.log('要対応:');
+    problems.forEach(p => console.log('  ✗ ' + p));
+    console.log('\n判定: NG — 上を直してから もう一度 --doctor を実行してください');
+    console.log('='.repeat(72));
+    process.exitCode = 1;
+    return;
+  }
+  console.log('判定: OK — このまま監視を開始できます');
+  console.log('\n  node apple-stock.js --watch');
+  console.log('\n  バックグラウンドで動かす場合:');
+  console.log('  nohup node apple-stock.js --watch >> watch.log 2>&1 &');
+  console.log('  tail -f watch.log');
+  console.log('='.repeat(72));
+}
+
 // ------------------------------------------------------------------- check
 function rowKey(r) {
   return `${r.kind}|${r.part}|${r.store}`;
@@ -424,9 +599,15 @@ async function checkOnce(state) {
 
   for (const { r } of inStock) state.lastAlertAt[rowKey(r)] = Date.now();
 
-  const lines = inStock.map(({ r }) =>
-    `• **${r.store}**${r.city ? `（${r.city}）` : ''} — ${r.part}${r.quote ? ` / ${r.quote}` : ''}`);
-  // 注: 同じ店舗が複数地点から返ることがあるため、通知は店舗×品番で1行にまとまる
+  // 同じ店舗で複数の品番（色違い）に在庫が出ることがあるため、店舗単位でまとめる
+  const byStore = new Map();
+  for (const { r } of inStock) {
+    const k = `${r.store}|${r.city}`;
+    if (!byStore.has(k)) byStore.set(k, { store: r.store, city: r.city, parts: [], quote: r.quote });
+    byStore.get(k).parts.push(r.part);
+  }
+  const lines = [...byStore.values()].map(g =>
+    `• **${g.store}**${g.city ? `（${g.city}）` : ''} — ${g.parts.join(', ')}${g.quote ? ` / ${g.quote}` : ''}`);
   const heading = inStock.every(x => x.repeat) ? '🟢 **在庫あり（継続中）**' : '🟢 **在庫が出ました**';
 
   await notify(
@@ -434,7 +615,7 @@ async function checkOnce(state) {
     lines.join('\n') + '\n' +
     `\n${BASE}/shop/buy-iphone`
   );
-  console.log(`[${ts()}] 通知送信: ${inStock.length}件`);
+  console.log(`[${ts()}] 通知送信: ${byStore.size}店舗 / ${inStock.length}件`);
 }
 
 // --------------------------------------------------------------------- main
@@ -455,6 +636,7 @@ async function main() {
 
   if (cmd === '--find-parts') return findParts(args[1] || '');
   if (cmd === '--raw') return raw();
+  if (cmd === '--doctor') return doctor();
   if (cmd === '--test') {
     await notify(`✅ Apple在庫監視 テスト通知 (${ts()})\n品番: \`${CFG.parts.join(', ') || '(未設定)'}\`\n地点: \`${CFG.locations.join(' / ') || '(未設定)'}\`\n店舗: \`${CFG.storeFilter.join(' / ') || '(絞り込みなし)'}\``);
     return console.log('テスト通知を送信しました');
@@ -467,10 +649,20 @@ async function main() {
     console.log(`[${ts()}] 監視開始: ${CFG.parts.join(', ')} @ ${CFG.locations.join('/')} ` +
       `${CFG.storeFilter.length ? `[${CFG.storeFilter.join('/')}]` : ''} / ${CFG.intervalSec}秒間隔`);
     for (;;) {
-      await checkOnce(state);
-      saveState(state);
-      const jitter = Math.floor((Math.random() - 0.5) * CFG.intervalSec * 0.3 * 1000);
-      await sleep(CFG.intervalSec * 1000 + jitter);
+      try {
+        await checkOnce(state);
+        saveState(state);
+      } catch (e) {
+        // 想定外の例外でも監視を止めない
+        state.failStreak = (state.failStreak || 0) + 1;
+        console.error(`[${ts()}] 想定外のエラー (${state.failStreak}回連続): ${e.message}`);
+      }
+      // 連続失敗中は間隔を伸ばす（403/レート制限で叩き続けないため。最大8倍）
+      const backoff = Math.min(2 ** (state.failStreak || 0), 8);
+      const base = CFG.intervalSec * backoff;
+      if (backoff > 1) console.error(`[${ts()}] 次回まで ${base}秒 待機（バックオフ x${backoff}）`);
+      const jitter = Math.floor((Math.random() - 0.5) * base * 0.3 * 1000);
+      await sleep(base * 1000 + jitter);
     }
   }
 
