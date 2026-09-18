@@ -74,6 +74,14 @@ function endpointUrls(location) {
   return paths.map(p => (p.startsWith('http') ? p : BASE + p) + '?' + qs.toString());
 }
 
+/** プロキシ設定があれば、その環境変数名を返す（403の原因切り分け用） */
+function proxyEnv() {
+  for (const k of ['HTTPS_PROXY', 'https_proxy', 'HTTP_PROXY', 'http_proxy', 'ALL_PROXY', 'all_proxy']) {
+    if (process.env[k]) return k;
+  }
+  return null;
+}
+
 async function getJson(url) {
   const res = await fetch(url, {
     headers: {
@@ -90,7 +98,10 @@ async function getJson(url) {
   const text = await res.text();
   if (!res.ok) {
     const hint = res.status === 541 ? ' — このエンドポイントは現在ブロックされている可能性があります'
-               : res.status === 403 ? ' — UA/Referer 拒否、またはレート制限の可能性'
+               : res.status === 403 ? (proxyEnv()
+                   ? ` — 403。プロキシ(${proxyEnv()})が設定されています。Appleの拒否ではなく`
+                     + `ネットワーク側の遮断かもしれません`
+                   : ' — UA/Referer 拒否、またはレート制限の可能性')
                : res.status === 429 ? ' — レート制限。間隔を空けてください'
                : '';
     throw Object.assign(new Error(`HTTP ${res.status}${hint}`), { status: res.status, body: text.slice(0, 400) });
@@ -416,6 +427,10 @@ async function doctor() {
     console.log('\n  ✗ 全地点で失敗しました:\n' + e.message.split('\n').map(l => '    ' + l).join('\n'));
     problems.push('Apple のエンドポイントに到達できません。'
       + '\n      541 なら APPLE_ENDPOINTS を変更、403 なら間隔を空けるかブラウザのCookieが必要です。'
+      + (proxyEnv()
+        ? `\n      ※ ${proxyEnv()} が設定されています。社内プロキシやサンドボックスによる遮断の可能性が高いです。`
+          + '\n         別のネットワーク（自宅のPCなど）で試してください。'
+        : '')
       + '\n      どうしても駄目なら check.js（is-checker.com 版）に切り替えてください。');
     return verdict(problems, warns);
   }
