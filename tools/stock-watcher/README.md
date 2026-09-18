@@ -1,128 +1,145 @@
 # iPhone 在庫監視 → Discord 通知
 
-`is-checker.com` の在庫表を定期的に取得し、**対象モデルに在庫マーカー（○ △ ◎ 在庫あり など）が出た瞬間**に Discord Webhook へ通知します。
+在庫が出た瞬間に Discord Webhook へ通知します。依存パッケージなし（Node 18+ の標準 `fetch` のみ）。
 
-- 依存パッケージなし（Node 18+ の標準 `fetch` のみ）
-- 監視対象はキーワードで指定（既定: `Pro Max` と `256` を両方含む行）
-- ページ構造が変わって対象行が見つからなくなった場合も Discord に警告が飛ぶ（無言の故障を防ぐ）
+| スクリプト | 取得元 | 位置づけ |
+|---|---|---|
+| **`apple-stock.js`** | **Apple公式エンドポイント** | **本命。** 店舗ごとの受け取り可否を直接取得 |
+| `check.js` | `is-checker.com` | 保険。Apple側がブロックされた時用（ページ下部「保険」参照） |
 
 ---
 
 ## ⚠️ 未検証の前提
 
-**このスクリプトを書いた環境からは `is-checker.com` にネットワーク到達できませんでした**（egress ブロック）。
-そのため以下は**未確認**です。使い始める前に必ず `--dump` で照合してください。
+**これを書いた環境から apple.com にネットワーク到達できませんでした**（egressブロック）。
+実レスポンスは一度も見ていません。次の点は**未確認**です。
 
-1. 在庫表が HTML に直接書かれているか、JavaScript で後から描画されているか
-2. 在庫の表現（`○/×` なのか `在庫あり/なし` なのか、画像なのか）
-3. 「Pro Max」「256」という表記が実際に使われているか
+1. どのエンドポイントが今も生きているか（`/shop/retail/pickup-message` か `/shop/fulfillment-messages` か）
+2. レスポンスのJSON構造
+3. UA/Referer だけでブロックされずに通るか（Cookie が要る可能性）
 
-`--dump` はこの3点をすべて出力します。
+そのため **JSONの階層を決め打ちしていません。** `partsAvailability` を持つオブジェクトを再帰探索して
+拾う実装なので、`body.stores[]` でも `body.content.pickupMessage.stores[]` でも動きます。
+エンドポイントも複数を順に試してフォールバックします。
+
+まず `--raw` で実物を確認してください。
 
 ---
 
-## 1. セットアップ（3分）
+## セットアップ
 
-### Discord Webhook を作る
-1. 通知を受けたいサーバーのチャンネル → 歯車（チャンネルの編集）
-2. **連携サービス** → **ウェブフック** → **新しいウェブフック** → **ウェブフックURLをコピー**
+### 1. 品番（Part Number）を調べる
 
-スマホに通知を飛ばしたいので、Discord アプリ側でそのチャンネルの通知を「すべてのメッセージ」にしておくこと。
-
-### 動作確認
+Apple の在庫APIは商品名ではなく **`MXYZ3J/A` 形式の品番**で引きます。容量・色・地域ごとに別番号です。
 
 ```bash
 cd tools/stock-watcher
 
-# ① まずページ構造を確認（通知しない）
-node check.js --dump
+APPLE_BUY_PAGE="https://www.apple.com/jp/shop/buy-iphone/iphone-18-pro" \
+  node apple-stock.js --find-parts 256
+```
+
+```
+品番            容量        色               名称
+------------------------------------------------------------------------------
+MXYZ3J/A      256GB     ブラック          iPhone 18 Pro Max
+MXYZ5J/A      256GB     ホワイト          iPhone 18 Pro Max
+```
+
+**見つからない場合**（購入ページがJS描画だと起こり得ます）:
+ブラウザで構成を選び、「バッグに追加」後のカート画面か、URL の `product=` パラメータに出る
+`MXXXXJ/A` 形式の文字列を控えてください。
+
+> 機種ページのURLは年ごとに変わります。`--find-parts` が0件なら `APPLE_BUY_PAGE` に
+> 実際の購入ページURLを指定し直してください。
+
+### 2. Discord Webhook を作る
+
+対象チャンネル → 歯車 → **連携サービス** → **ウェブフック** → **新しいウェブフック** → URLをコピー。
+スマホに飛ばすなら、Discordアプリでそのチャンネルの通知を「すべてのメッセージ」にしておくこと。
+
+### 3. 実物のレスポンスを確認する（最重要）
+
+```bash
+export APPLE_PARTS="MXYZ3J/A"
+export APPLE_LOCATION="150-0002"    # 郵便番号。近隣店舗がこれを基準に返る
+
+node apple-stock.js --raw
 ```
 
 出力の見かた:
 
 | 出力 | 意味 | 対応 |
 |---|---|---|
-| `マッチした行 (1件)` かつ `在庫マーカー: なし` | **正常**。このまま監視できる | そのまま次へ |
-| `マッチした行 (0件)` | キーワードが合っていない | `Pro Max を含む行` の一覧を見て `MATCH_KEYWORDS` を調整 |
-| `生HTMLに "Pro Max" が存在 : NO` | **JSで描画されている** | このスクリプトでは取れない。下の「JS描画だった場合」へ |
-| `マッチした行` が複数件 | 色違い等で複数行ある | 色名を足して絞る（例 `MATCH_KEYWORDS="Pro Max,256,ブラック"`） |
+| `受け取り(pickup) 抽出結果: 3件` のように店舗が並ぶ | **正常。** そのまま監視できる | 次へ |
+| `抽出結果: 0件` | 構造が想定外 | 保存された `apple-raw.json` を確認。`location` 未指定/品番ミスが多い |
+| `全エンドポイントが失敗 … HTTP 541` | 両方ブロックされている | `APPLE_ENDPOINTS` で別パスを試すか、`check.js` に切り替え |
+| `HTTP 403` | UA/Referer 拒否かレート制限 | 間隔を空ける。それでも駄目ならブラウザのCookieが必要 |
 
-```bash
-# ② Discord への疎通テスト
-DISCORD_WEBHOOK_URL="https://discord.com/api/webhooks/..." node check.js --test
-
-# ③ 送信せずに判定だけ見る
-DRY_RUN=1 node check.js
-```
-
-## 2. 常時監視する
+### 4. 監視開始
 
 ```bash
 export DISCORD_WEBHOOK_URL="https://discord.com/api/webhooks/..."
-export MATCH_KEYWORDS="Pro Max,256"
-export INTERVAL_SEC=60
-
-node check.js --watch
+node apple-stock.js --test     # 疎通テスト
+node apple-stock.js --watch    # 常駐監視
 ```
-
-PC を閉じても動かしたい場合は VPS か、下の GitHub Actions を使う。
 
 macOS で常駐させるなら:
 ```bash
-nohup node check.js --watch >> watch.log 2>&1 &
+nohup node apple-stock.js --watch >> watch.log 2>&1 &
 tail -f watch.log
 ```
 
-## 3. GitHub Actions で動かす（PCを開けっぱなしにしない方法）
+---
 
-リポジトリの `.github/workflows/stock-watch.yml` が5分おきに実行します。
-
-1. GitHub → Settings → **Secrets and variables** → **Actions**
-2. **Secrets** タブ → `DISCORD_WEBHOOK_URL` を登録
-3. （任意）**Variables** タブ → `MATCH_KEYWORDS` / `MENTION` / `TARGET_URL` を登録
-4. Actions タブ → 「iPhone 在庫監視」→ **Run workflow** → mode に `dump` を選んで、まず構造を確認
-
-**重要な制約**: GitHub Actions の cron は最短5分間隔で、かつ**混雑時は実行が10〜30分遅れることがあります**。
-発売直後の在庫争奪には向きません。速さが要るなら `--watch` を手元か VPS で回してください。
-
-## 4. 設定できる環境変数
+## 設定できる環境変数
 
 | 変数 | 既定値 | 説明 |
 |---|---|---|
-| `DISCORD_WEBHOOK_URL` | （必須） | Discord Webhook URL |
-| `TARGET_URL` | `https://is-checker.com/i18_stock_4.html?411` | 監視するページ |
-| `MATCH_KEYWORDS` | `Pro Max,256` | **すべて**含む行を対象にする（AND） |
-| `EXCLUDE_KEYWORDS` | （空） | 含む行を除外する |
+| `APPLE_PARTS` | （必須） | 品番。カンマ区切りで複数可 例 `MXYZ3J/A,MXYZ5J/A` |
+| `APPLE_LOCATION` | （必須） | 郵便番号や都市名 例 `150-0002` |
+| `DISCORD_WEBHOOK_URL` | （必須） | Discord Webhook URL（`DRY_RUN=1` なら不要） |
+| `APPLE_REGION` | `jp` | URLの地域セグメント。米国は空文字 |
+| `STORE_FILTER` | （空） | 店舗名の部分一致で絞る 例 `渋谷` |
+| `APPLE_ENDPOINTS` | `/shop/retail/pickup-message,/shop/fulfillment-messages` | 試す順。カンマ区切り |
+| `APPLE_BUY_PAGE` | `{BASE}/shop/buy-iphone` | `--find-parts` が読むページ |
+| `INCLUDE_DELIVERY` | `0` | `1` でオンライン配送の可否も監視対象に含める |
 | `INTERVAL_SEC` | `60` | `--watch` の間隔（秒）。±15%のゆらぎを自動で入れる |
-| `MENTION` | （空） | 通知の先頭に付ける。例 `@everyone` / `<@あなたのID>` |
-| `REPEAT_MIN` | `30` | 在庫ありが続く間、何分おきに再通知するか。`0` で再通知なし |
-| `TREAT_TRIANGLE_AS_IN` | `1` | `△`（残りわずか）を在庫ありとみなす。`0` で ○ のみ |
-| `NOTIFY_ON_ANY_CHANGE` | `0` | `1` にすると在庫以外の表示変化でも通知（デバッグ用） |
+| `MENTION` | （空） | 通知の先頭に付ける 例 `@everyone` / `<@あなたのID>` |
+| `REPEAT_MIN` | `30` | 在庫ありが続く間の再通知間隔（分）。`0` で再通知なし |
 | `DRY_RUN` | `0` | `1` で送信せず標準出力に表示 |
-| `STATE_FILE` | `./state.json` | 前回状態の保存先 |
+| `STATE_FILE` | `./apple-state.json` | 前回状態の保存先 |
 
-## 5. 通知の判定ロジック
+## 判定ロジック
 
-1. HTML から `<tr>` 単位（なければブロック要素単位）で行テキストを抽出
-2. `MATCH_KEYWORDS` を**すべて**含む行だけ残す
-3. その行から「入荷待ち」「在庫なし」等の**否定表現を先に除去**
-4. 残りに含まれる在庫マーカー（`○ ◯ 〇 ● ◎ △ ▲ ✓ 在庫あり 残りわずか 受取可 …`）の**個数**を数える
-5. 前回より**個数が増えていたら通知**（0→1 は「在庫が出ました」、1→2 は「在庫が増えました」）
+1. `APPLE_ENDPOINTS` を順に叩き、最初にJSONが返ったものを使う
+2. レスポンス全体を再帰探索し、`partsAvailability` を持つオブジェクトを全部拾う
+   （店舗名は同じ階層の `storeName` / `storeDisplayName` から、なければ親から継承）
+3. 各店舗×品番について `pickupDisplay` を見る。`available` なら在庫あり
+4. `pickupDisplay` が無い場合は `pickupSearchQuote` 等の文言で判定
+   （「受け取れません」「利用できません」等を先に除外してから「本日」「受け取り可能」を探す）
+5. **在庫なし→在庫あり に変わった店舗だけ**通知する
 
-行の識別キーは在庫記号を除いた部分（例 `iPhone 18 Pro Max 256GB ブラック`）なので、
-在庫が変わってもキーは変わらず、変化を正しく追えます。
+在庫情報が1件も抽出できなくなった場合も警告を飛ばすので、無言で壊れることはありません。
 
-## 6. JS描画だった場合
+## 注意
 
-`--dump` で `生HTMLに "Pro Max" が存在 : NO` と出たら、在庫表は JavaScript が後から描いています。
-その場合は `--dump` が出力する `参照されている json/php/cgi` の URL を見てください。
-たいていそこに在庫データの実体があるので、`TARGET_URL` をその URL に差し替えるだけで動くことがあります。
-それでも駄目ならヘッドレスブラウザ（Playwright）版が必要です。
+- **叩きすぎないでください。** `INTERVAL_SEC` は 30秒未満にしないこと。403やIP遮断のリスクがあります。
+- Apple側の仕様変更でいつ壊れてもおかしくありません。`--raw` が最初の切り分け手段です。
+- GitHub Actions 版（`.github/workflows/stock-watch.yml`）も用意していますが、
+  cron は最短5分間隔かつ**混雑時は10〜30分遅れます**。発売直後の争奪には `--watch` を使ってください。
 
-## 7. 既知の限界
+---
 
-- `is-checker.com` は Apple 非公式の集計サイトです。**サイト側の更新が遅れれば通知も遅れます**。
-  最速を狙うなら Apple 公式の在庫確認エンドポイントを直接叩く方が有利です（本スクリプトは未対応）。
-- サイトに負荷をかけないよう、`INTERVAL_SEC` は 30 秒未満にしないでください。
-- 在庫が画像（`<img src="maru.png">`）で表現されている場合、テキスト抽出では拾えません。
-  その場合は `MATCH_KEYWORDS` は効きますが在庫判定が常に0になるため、`--dump` で必ず確認してください。
+## 保険: `check.js`（is-checker.com）版
+
+Apple公式が 541/403 で完全に塞がれた場合のフォールバックとして、
+非公式集計サイト `is-checker.com` をスクレイピングする `check.js` も残してあります。
+
+```bash
+node check.js --dump    # ページ構造を確認
+node check.js --watch
+```
+
+設定は `MATCH_KEYWORDS`（既定 `Pro Max,256`）等。詳細は `check.js` 冒頭のコメント参照。
+こちらは二次集計なので、**サイト側の更新が遅れれば通知も遅れます。** あくまで保険です。

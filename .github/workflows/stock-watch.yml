@@ -2,16 +2,16 @@ name: iPhone 在庫監視
 
 on:
   schedule:
-    # 5分ごと（GitHub Actions の最短間隔）。実際の実行は数分〜十数分ずれることがある。
+    # 5分ごと（GitHub Actions の最短間隔）。混雑時は実行が10〜30分遅れることがある。
     - cron: '*/5 * * * *'
   workflow_dispatch:
     inputs:
       mode:
-        description: '実行モード'
+        description: '実行モード（初回は raw で構造確認、find-parts で品番探索）'
         required: false
         default: 'check'
         type: choice
-        options: [check, dump, test]
+        options: [check, raw, find-parts, test]
 
 permissions:
   contents: read
@@ -34,28 +34,40 @@ jobs:
       - name: 前回の状態を復元
         uses: actions/cache/restore@v4
         with:
-          path: tools/stock-watcher/state.json
-          key: stock-state-${{ github.run_id }}
-          restore-keys: stock-state-
+          path: tools/stock-watcher/apple-state.json
+          key: apple-state-${{ github.run_id }}
+          restore-keys: apple-state-
 
       - name: 在庫チェック
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-          TARGET_URL: ${{ vars.TARGET_URL || 'https://is-checker.com/i18_stock_4.html?411' }}
-          MATCH_KEYWORDS: ${{ vars.MATCH_KEYWORDS || 'Pro Max,256' }}
+          APPLE_PARTS: ${{ vars.APPLE_PARTS }}
+          APPLE_LOCATION: ${{ vars.APPLE_LOCATION }}
+          APPLE_REGION: ${{ vars.APPLE_REGION || 'jp' }}
+          APPLE_BUY_PAGE: ${{ vars.APPLE_BUY_PAGE }}
+          STORE_FILTER: ${{ vars.STORE_FILTER }}
           MENTION: ${{ vars.MENTION }}
           # Actions は5分間隔なので、在庫継続中の再通知は控えめに
           REPEAT_MIN: ${{ vars.REPEAT_MIN || '60' }}
         run: |
           case "${{ inputs.mode || 'check' }}" in
-            dump) node tools/stock-watcher/check.js --dump ;;
-            test) node tools/stock-watcher/check.js --test ;;
-            *)    node tools/stock-watcher/check.js ;;
+            raw)        node tools/stock-watcher/apple-stock.js --raw ;;
+            find-parts) node tools/stock-watcher/apple-stock.js --find-parts ;;
+            test)       node tools/stock-watcher/apple-stock.js --test ;;
+            *)          node tools/stock-watcher/apple-stock.js --check ;;
           esac
 
+      - name: 構造確認用に生JSONを保存
+        if: always() && inputs.mode == 'raw'
+        uses: actions/upload-artifact@v4
+        with:
+          name: apple-raw-json
+          path: tools/stock-watcher/apple-raw.json
+          if-no-files-found: ignore
+
       - name: 状態を保存
-        if: always() && inputs.mode != 'dump'
+        if: always() && inputs.mode != 'raw' && inputs.mode != 'find-parts'
         uses: actions/cache/save@v4
         with:
-          path: tools/stock-watcher/state.json
-          key: stock-state-${{ github.run_id }}
+          path: tools/stock-watcher/apple-state.json
+          key: apple-state-${{ github.run_id }}
