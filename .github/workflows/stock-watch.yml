@@ -1,0 +1,61 @@
+name: iPhone 在庫監視
+
+on:
+  schedule:
+    # 5分ごと（GitHub Actions の最短間隔）。実際の実行は数分〜十数分ずれることがある。
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: '実行モード'
+        required: false
+        default: 'check'
+        type: choice
+        options: [check, dump, test]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stock-watch
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: 前回の状態を復元
+        uses: actions/cache/restore@v4
+        with:
+          path: tools/stock-watcher/state.json
+          key: stock-state-${{ github.run_id }}
+          restore-keys: stock-state-
+
+      - name: 在庫チェック
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          TARGET_URL: ${{ vars.TARGET_URL || 'https://is-checker.com/i18_stock_4.html?411' }}
+          MATCH_KEYWORDS: ${{ vars.MATCH_KEYWORDS || 'Pro Max,256' }}
+          MENTION: ${{ vars.MENTION }}
+          # Actions は5分間隔なので、在庫継続中の再通知は控えめに
+          REPEAT_MIN: ${{ vars.REPEAT_MIN || '60' }}
+        run: |
+          case "${{ inputs.mode || 'check' }}" in
+            dump) node tools/stock-watcher/check.js --dump ;;
+            test) node tools/stock-watcher/check.js --test ;;
+            *)    node tools/stock-watcher/check.js ;;
+          esac
+
+      - name: 状態を保存
+        if: always() && inputs.mode != 'dump'
+        uses: actions/cache/save@v4
+        with:
+          path: tools/stock-watcher/state.json
+          key: stock-state-${{ github.run_id }}
