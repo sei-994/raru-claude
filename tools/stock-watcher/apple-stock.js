@@ -6,6 +6,7 @@
  *
  *   node apple-stock.js --doctor              設定から通知まで一気通貫で自己診断（まずこれ）
  *   node apple-stock.js --find-parts 256      購入ページから品番(MXXXXJ/A)を探す
+ *   node apple-stock.js --profit              買取価格と利益の一覧（ネット接続不要）
  *   node apple-stock.js --raw                 生JSONを保存して構造を確認する
  *   node apple-stock.js --check               1回チェック
  *   node apple-stock.js --watch               常駐監視
@@ -53,6 +54,59 @@ const CFG = {
 };
 
 const BASE = `https://www.apple.com${CFG.region ? '/' + CFG.region : ''}`;
+
+// --------------------------------------------------------- 表示名と買取価格
+// prices.json（任意）。無ければラベルは品番そのまま、利益計算は行わない。
+function loadPrices() {
+  const f = process.env.PRICES_FILE || path.join(__dirname, 'prices.json');
+  if (!fs.existsSync(f)) return { file: null, labels: {}, cost: {}, buyers: {} };
+  try {
+    const j = JSON.parse(fs.readFileSync(f, 'utf8'));
+    return {
+      file: f,
+      labels: j.labels || {},
+      cost: j.cost || {},
+      buyers: j.buyers || {},
+    };
+  } catch (e) {
+    console.error(`価格ファイルを読めません (${f}): ${e.message}`);
+    return { file: f, labels: {}, cost: {}, buyers: {}, error: e.message };
+  }
+}
+const PRICES = loadPrices();
+
+/** 品番を人が読める名前に。未登録なら品番そのまま。 */
+function label(part) {
+  return PRICES.labels[part] || part;
+}
+
+const yen = n => '¥' + Number(n).toLocaleString('ja-JP');
+
+/** その品番を一番高く買う店。未設定なら null。 */
+function bestOffer(part) {
+  let best = null;
+  for (const [buyer, table] of Object.entries(PRICES.buyers)) {
+    const price = Number(table?.[part] || 0);
+    if (price > 0 && (!best || price > best.price)) best = { buyer, price };
+  }
+  if (!best) return null;
+  const cost = Number(PRICES.cost[part] || 0);
+  return { ...best, cost: cost || null, profit: cost > 0 ? best.price - cost : null };
+}
+
+/** 在庫が出た品番について、買取見込みの行を組み立てる */
+function profitLines(parts) {
+  const lines = [];
+  for (const part of [...new Set(parts)]) {
+    const o = bestOffer(part);
+    if (!o) continue;
+    const profit = o.profit === null ? '仕入未設定'
+      : (o.profit >= 0 ? '+' : '−') + yen(Math.abs(o.profit)).slice(1);
+    lines.push(`${label(part)}　${o.cost ? `仕入 ${yen(o.cost)} → ` : ''}`
+      + `${o.buyer} ${yen(o.price)}（${profit}）`);
+  }
+  return lines;
+}
 const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const ts = () => new Date().toISOString().replace('T', ' ').slice(0, 19);
@@ -260,8 +314,10 @@ async function notify(content) {
     console.log(`[DRY RUN / 未送信]\n${content}\n`);
     return;
   }
+  let text = (CFG.mention ? CFG.mention + ' ' : '') + content;
+  if (text.length > 1900) text = text.slice(0, 1890) + '\n…（省略）';
   const body = JSON.stringify({
-    content: (CFG.mention ? CFG.mention + ' ' : '') + content,
+    content: text,
     allowed_mentions: { parse: ['everyone', 'users', 'roles'] },
   });
   for (let i = 0; i < 3; i++) {
@@ -399,6 +455,59 @@ async function raw() {
   }
 }
 
+// ------------------------------------------------------------------ profit
+// 品番 × 買取店の価格表と利益を一覧表示する。ネットワークは使わない。
+function showProfit() {
+  if (!PRICES.file) {
+    console.log('価格ファイルがありません。作ってください:');
+    console.log('  cp prices.example.json prices.json');
+    console.log('  open -e prices.json      # 金額を埋める');
+    process.exitCode = 1;
+    return;
+  }
+  if (PRICES.error) { console.log('価格ファイルが壊れています:', PRICES.error); process.exitCode = 1; return; }
+
+  const parts = CFG.parts.length ? CFG.parts
+    : [...new Set([...Object.keys(PRICES.cost), ...Object.values(PRICES.buyers).flatMap(t => Object.keys(t))])];
+  const buyers = Object.keys(PRICES.buyers);
+
+  if (!parts.length) { console.log('品番が1つも設定されていません。'); process.exitCode = 1; return; }
+
+  const pad = (str, w) => {
+    // 全角を2文字幅として揃える
+    const width = [...String(str)].reduce((a, c) => a + (/[\x00-\xff]/.test(c) ? 1 : 2), 0);
+    return String(str) + ' '.repeat(Math.max(0, w - width));
+  };
+
+  console.log('='.repeat(86));
+  console.log('買取価格と利益  (価格ファイル:', PRICES.file + ')');
+  console.log('='.repeat(86));
+  console.log(pad('機種', 24) + pad('仕入', 12) + buyers.map(b => pad(b, 14)).join('') + '最高値との差');
+  console.log('-'.repeat(86));
+
+  let anyPrice = false;
+  for (const part of parts) {
+    const cost = Number(PRICES.cost[part] || 0);
+    const best = bestOffer(part);
+    if (best) anyPrice = true;
+    const cells = buyers.map(b => {
+      const v = Number(PRICES.buyers[b]?.[part] || 0);
+      return pad(v > 0 ? yen(v) : '-', 14);
+    });
+    const diff = !best ? '-'
+      : best.profit === null ? `${best.buyer}（仕入未設定）`
+      : `${best.profit >= 0 ? '+' : '−'}${yen(Math.abs(best.profit)).slice(1)}  ${best.buyer}`;
+    console.log(pad(label(part), 24) + pad(cost > 0 ? yen(cost) : '-', 12) + cells.join('') + diff);
+  }
+  console.log('='.repeat(86));
+  if (!anyPrice) {
+    console.log('買取価格が1件も入っていません。prices.json の buyers を埋めてください。');
+  } else if (parts.some(p => !Number(PRICES.cost[p]))) {
+    console.log('※ 仕入価格が未設定の品番があります。利益を出すには cost を埋めてください。');
+  }
+  console.log('この表は手入力した価格に基づきます。相場は日々変わるので、都度更新してください。');
+}
+
 // ------------------------------------------------------------------ doctor
 // 設定から実際の通知までを一気通貫で自己診断し、次にやることを指示する。
 async function doctor() {
@@ -414,6 +523,11 @@ async function doctor() {
   console.log('地点         :', CFG.locations.join(' / ') || '(未設定)');
   console.log('店舗フィルタ :', CFG.storeFilter.join(' / ') || '(絞り込みなし)');
   console.log('監視間隔     :', CFG.intervalSec + '秒');
+  const nBuyers = Object.keys(PRICES.buyers).length;
+  const nCost = Object.values(PRICES.cost).filter(v => Number(v) > 0).length;
+  console.log('価格ファイル :', PRICES.file
+    ? `${PRICES.file} (仕入 ${nCost}件 / 買取店 ${nBuyers}店)`
+    : '(なし。--profit と買取見込みは無効)');
 
   if (!CFG.parts.length) problems.push('APPLE_PARTS が未設定です（--find-parts で品番を調べてください）');
   if (!CFG.locations.length) problems.push('APPLE_LOCATION が未設定です');
@@ -462,7 +576,8 @@ async function doctor() {
   const seenParts = new Set(all.map(r => r.part));
   for (const part of CFG.parts) {
     const ok = seenParts.has(part);
-    console.log(`  ${ok ? '✓' : '✗'} ${part}${ok ? '' : '  ← 結果に出てきません。品番が誤っている可能性'}`);
+    const name = label(part) === part ? '' : `  ${label(part)}`;
+    console.log(`  ${ok ? '✓' : '✗'} ${part}${name}${ok ? '' : '  ← 結果に出てきません。品番が誤っている可能性'}`);
     if (!ok) problems.push(`品番 ${part} が Apple 側の応答に出てきません。--find-parts で調べ直してください`);
   }
   const extra = [...seenParts].filter(p => !CFG.parts.includes(p));
@@ -596,7 +711,7 @@ async function checkOnce(state) {
     const was = prev ? prev.inStock : null;
 
     if (was === null) {
-      console.log(`[${ts()}] 初回記録: ${now ? '在庫あり' : '在庫なし'} ${r.store} ${r.part}`);
+      console.log(`[${ts()}] 初回記録: ${now ? '在庫あり' : '在庫なし'} ${r.store} ${label(r.part)}`);
       if (now) inStock.push({ r, first: true });
     } else if (now && !was) {
       inStock.push({ r, first: false });
@@ -624,12 +739,15 @@ async function checkOnce(state) {
     byStore.get(k).parts.push(r.part);
   }
   const lines = [...byStore.values()].map(g =>
-    `• **${g.store}**${g.city ? `（${g.city}）` : ''} — ${g.parts.join(', ')}${g.quote ? ` / ${g.quote}` : ''}`);
+    `• **${g.store}**${g.city ? `（${g.city}）` : ''} — ${g.parts.map(label).join(', ')}`
+    + `${g.quote ? ` / ${g.quote}` : ''}`);
+  const profit = profitLines(inStock.map(x => x.r.part));
   const heading = inStock.every(x => x.repeat) ? '🟢 **在庫あり（継続中）**' : '🟢 **在庫が出ました**';
 
   await notify(
     `${heading}\n` +
-    lines.join('\n') + '\n' +
+    lines.join('\n') +
+    (profit.length ? '\n\n💰 **買取見込み（最高値の店）**\n```\n' + profit.join('\n') + '\n```' : '\n') +
     `\n${BASE}/shop/buy-iphone`
   );
   console.log(`[${ts()}] 通知送信: ${byStore.size}店舗 / ${inStock.length}件`);
@@ -654,6 +772,7 @@ async function main() {
   if (cmd === '--find-parts') return findParts(args[1] || '');
   if (cmd === '--raw') return raw();
   if (cmd === '--doctor') return doctor();
+  if (cmd === '--profit') return showProfit();
   if (cmd === '--test') {
     await notify(`✅ Apple在庫監視 テスト通知 (${ts()})\n品番: \`${CFG.parts.join(', ') || '(未設定)'}\`\n地点: \`${CFG.locations.join(' / ') || '(未設定)'}\`\n店舗: \`${CFG.storeFilter.join(' / ') || '(絞り込みなし)'}\``);
     return console.log('テスト通知を送信しました');

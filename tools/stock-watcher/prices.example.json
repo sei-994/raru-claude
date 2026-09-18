@@ -1,0 +1,42 @@
+{
+  "_README": [
+    "このファイルを prices.json にコピーして金額を埋めてください。",
+    "  cp prices.example.json prices.json && open -e prices.json",
+    "prices.json は .gitignore 済みです。",
+    "",
+    "labels : 通知やログでの表示名。品番の代わりにこれが出ます。",
+    "cost   : 仕入価格（Appleでの支払額、税込）。利益計算の基準。",
+    "buyers : 買取店ごとの買取価格。店は好きなだけ増やせます。",
+    "",
+    "金額が 0 の行は「未設定」として扱われ、利益は表示されません。",
+    "cost だけ入れて buyers が空でも動きます（その場合 --profit は買取価格なしと表示）。",
+    "一覧を見るには: node apple-stock.js --profit"
+  ],
+
+  "labels": {
+    "MJX54J/A": "256GB ブラック",
+    "MJX64J/A": "256GB シルバー",
+    "MJX74J/A": "256GB バーガンディ",
+    "MJX84J/A": "256GB グレイシャー",
+    "MJXA4J/A": "512GB ブラック",
+    "MJXB4J/A": "512GB シルバー",
+    "MJXC4J/A": "512GB バーガンディ",
+    "MJXD4J/A": "512GB グレイシャー"
+  },
+
+  "cost": {
+    "MJX54J/A": 0, "MJX64J/A": 0, "MJX74J/A": 0, "MJX84J/A": 0,
+    "MJXA4J/A": 0, "MJXB4J/A": 0, "MJXC4J/A": 0, "MJXD4J/A": 0
+  },
+
+  "buyers": {
+    "じゃんぱら": {
+      "MJX54J/A": 0, "MJX64J/A": 0, "MJX74J/A": 0, "MJX84J/A": 0,
+      "MJXA4J/A": 0, "MJXB4J/A": 0, "MJXC4J/A": 0, "MJXD4J/A": 0
+    },
+    "ゲオ": {
+      "MJX54J/A": 0, "MJX64J/A": 0, "MJX74J/A": 0, "MJX84J/A": 0,
+      "MJXA4J/A": 0, "MJXB4J/A": 0, "MJXC4J/A": 0, "MJXD4J/A": 0
+    }
+  }
+}
