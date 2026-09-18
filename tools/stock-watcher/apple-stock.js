@@ -17,8 +17,11 @@ const path = require('path');
 const CFG = {
   region: process.env.APPLE_REGION || 'jp',          // 'jp' / 'us'(空文字) など
   parts: (process.env.APPLE_PARTS || '').split(',').map(s => s.trim()).filter(Boolean),
-  location: process.env.APPLE_LOCATION || '',        // 郵便番号 例 "150-0002" / 都市名
-  storeFilter: process.env.STORE_FILTER || '',       // 店舗名の部分一致で絞る 例 "渋谷"
+  // 郵便番号/都市名。カンマ区切りで複数指定すると、それぞれ問い合わせて結果をまとめる
+  locations: (process.env.APPLE_LOCATIONS || process.env.APPLE_LOCATION || '')
+    .split(',').map(s => s.trim()).filter(Boolean),
+  // 店舗名の部分一致で絞る。カンマ区切りでOR 例 "川崎,渋谷,新宿"
+  storeFilter: (process.env.STORE_FILTER || '').split(',').map(s => s.trim()).filter(Boolean),
   buyPage: process.env.APPLE_BUY_PAGE || '',         // --find-parts 用
   webhook: process.env.DISCORD_WEBHOOK_URL || '',
   mention: process.env.MENTION || '',
@@ -37,14 +40,14 @@ const ts = () => new Date().toISOString().replace('T', ' ').slice(0, 19);
 // ---------------------------------------------------------------- endpoints
 // fulfillment-messages は 541 を返すようになったとの報告があるため、
 // pickup-message を先に試し、駄目なら fulfillment-messages にフォールバックする。
-function endpointUrls() {
+function endpointUrls(location) {
   const qs = new URLSearchParams();
   qs.set('pl', 'true');
   CFG.parts.forEach((p, i) => {
     qs.set(`parts.${i}`, p);
     qs.set(`mts.${i}`, 'regular');
   });
-  if (CFG.location) qs.set('location', CFG.location);
+  if (location) qs.set('location', location);
 
   const overrides = (process.env.APPLE_ENDPOINTS || '').split(',').map(s => s.trim()).filter(Boolean);
   const paths = overrides.length ? overrides : ['/shop/retail/pickup-message', '/shop/fulfillment-messages'];
@@ -78,18 +81,54 @@ async function getJson(url) {
   }
 }
 
-/** 複数エンドポイントを順に試し、最初に成功したものを返す */
-async function fetchAvailabilityJson() {
+/** 1地点について、複数エンドポイントを順に試し最初に成功したものを返す */
+async function fetchOneLocation(location) {
   const errors = [];
-  for (const url of endpointUrls()) {
+  for (const url of endpointUrls(location)) {
     try {
-      const json = await getJson(url);
-      return { json, url };
+      return { json: await getJson(url), url, location };
     } catch (e) {
       errors.push(`${url.split('?')[0]} → ${e.message}`);
     }
   }
-  throw new Error('全エンドポイントが失敗:\n  ' + errors.join('\n  '));
+  throw new Error(`[${location || '地点未指定'}] 全エンドポイントが失敗:\n    ` + errors.join('\n    '));
+}
+
+/**
+ * 全地点を順に問い合わせる。1地点でも成功すればその結果を返す。
+ * Apple は location を中心に近隣店舗を返すため、離れた店舗を見たい場合は
+ * 地点を複数指定する必要がある（例: 川崎と渋谷）。
+ */
+async function fetchAllLocations() {
+  const results = [], errors = [];
+  for (const [i, loc] of CFG.locations.entries()) {
+    if (i > 0) await sleep(800);   // 連続アクセスを避ける
+    try {
+      results.push(await fetchOneLocation(loc));
+    } catch (e) {
+      errors.push(e.message);
+    }
+  }
+  if (!results.length) throw new Error('全地点で取得失敗:\n  ' + errors.join('\n  '));
+  if (errors.length) console.error('一部の地点で取得失敗:\n  ' + errors.join('\n  '));
+  return results;
+}
+
+/** 複数地点の結果を1つの配列にまとめる（店舗×品番で重複排除） */
+function mergeRows(results, { delivery = false } = {}) {
+  const map = new Map();
+  for (const { json, location } of results) {
+    let rows = extractPickup(json);
+    if (delivery) rows = rows.concat(extractDelivery(json));
+    for (const r of rows) {
+      const k = `${r.kind}|${r.part}|${r.store}`;
+      // 同じ店舗が複数地点から返った場合、在庫ありの情報を優先して残す
+      if (!map.has(k) || (isInStock(r) && !isInStock(map.get(k)))) {
+        map.set(k, { ...r, location });
+      }
+    }
+  }
+  return [...map.values()];
 }
 
 // ------------------------------------------------------- 汎用JSONウォーカー
@@ -175,9 +214,10 @@ function isInStock(row) {
 }
 
 function applyStoreFilter(rows) {
-  if (!CFG.storeFilter) return rows;
-  const f = CFG.storeFilter.toLowerCase();
-  return rows.filter(r => r.kind === 'delivery' || `${r.store} ${r.city}`.toLowerCase().includes(f));
+  if (!CFG.storeFilter.length) return rows;
+  const fs_ = CFG.storeFilter.map(f => f.toLowerCase());
+  return rows.filter(r =>
+    r.kind === 'delivery' || fs_.some(f => `${r.store} ${r.city}`.toLowerCase().includes(f)));
 }
 
 // ------------------------------------------------------------------ Discord
@@ -288,29 +328,37 @@ async function findParts(filter) {
 // ------------------------------------------------------------------ raw出力
 async function raw() {
   requireConfig({ webhook: false });
-  const { json, url } = await fetchAvailabilityJson();
+  const results = await fetchAllLocations();
   const out = path.join(__dirname, 'apple-raw.json');
-  fs.writeFileSync(out, JSON.stringify(json, null, 2));
-
-  const pickup = extractPickup(json);
-  const delivery = extractDelivery(json);
+  fs.writeFileSync(out, JSON.stringify(
+    results.map(r => ({ location: r.location, url: r.url, json: r.json })), null, 2));
 
   console.log('='.repeat(76));
-  console.log('成功したエンドポイント:', url.split('?')[0]);
-  console.log('生JSON保存先          :', out);
-  console.log('品番                  :', CFG.parts.join(', '));
-  console.log('location              :', CFG.location || '(未指定)');
+  console.log('品番        :', CFG.parts.join(', '));
+  console.log('地点        :', CFG.locations.join(' / '));
+  console.log('店舗フィルタ:', CFG.storeFilter.join(' / ') || '(なし)');
+  console.log('生JSON保存先:', out);
+  for (const r of results) console.log(`  ${r.location} → ${r.url.split('?')[0]}`);
   console.log('='.repeat(76));
 
-  console.log(`\n▼ 受け取り(pickup) 抽出結果: ${pickup.length}件`);
+  const pickup = mergeRows(results);
+  console.log(`\n▼ 返ってきた店舗すべて: ${pickup.length}件`);
   if (!pickup.length) {
     console.log('  0件 — partsAvailability が見つかりません。apple-raw.json を確認してください。');
-    console.log('  よくある原因: location 未指定 / 品番が不正 / 地域(APPLE_REGION)違い');
+    console.log('  よくある原因: 地点の指定ミス / 品番が不正 / 地域(APPLE_REGION)違い');
   }
-  for (const r of applyStoreFilter(pickup)) {
-    console.log(`  [${isInStock(r) ? '在庫あり' : '在庫なし'}] ${r.store}${r.city ? `(${r.city})` : ''} | ${r.part} | display=${r.display || '-'} | ${r.quote || '-'}`);
+  for (const r of pickup) {
+    console.log(`  [${isInStock(r) ? '在庫あり' : '在庫なし'}] ${r.store}${r.city ? `(${r.city})` : ''} | ${r.part} | 取得元地点=${r.location} | display=${r.display || '-'} | ${r.quote || '-'}`);
   }
 
+  const kept = applyStoreFilter(pickup);
+  console.log(`\n▼ STORE_FILTER 適用後（実際に監視される店舗）: ${kept.length}件`);
+  if (CFG.storeFilter.length && !kept.length) {
+    console.log('  0件 — 店舗名が一致していません。上の一覧の表記に合わせてください。');
+  }
+  for (const r of kept) console.log(`  ${r.store}${r.city ? `(${r.city})` : ''}`);
+
+  const delivery = mergeRows(results, { delivery: true }).filter(r => r.kind === 'delivery');
   console.log(`\n▼ 配送(delivery) 抽出結果: ${delivery.length}件`);
   for (const r of delivery) {
     console.log(`  [${isInStock(r) ? '購入可' : '購入不可'}] ${r.part} | isBuyable=${r.display || '-'} | ${r.quote || '-'}`);
@@ -323,9 +371,9 @@ function rowKey(r) {
 }
 
 async function checkOnce(state) {
-  let json, url;
+  let results;
   try {
-    ({ json, url } = await fetchAvailabilityJson());
+    results = await fetchAllLocations();
     state.failStreak = 0;
   } catch (e) {
     state.failStreak = (state.failStreak || 0) + 1;
@@ -336,15 +384,13 @@ async function checkOnce(state) {
     return;
   }
 
-  let rows = extractPickup(json);
-  if (CFG.includeDelivery) rows = rows.concat(extractDelivery(json));
-  rows = applyStoreFilter(rows);
+  let rows = applyStoreFilter(mergeRows(results, { delivery: CFG.includeDelivery }));
 
   if (!rows.length) {
     console.error(`[${ts()}] 抽出0件 — レスポンス構造が変わった可能性`);
     if (Date.now() - (state.emptyAt || 0) > 60 * 60 * 1000) {
       state.emptyAt = Date.now();
-      await notify(`⚠️ Apple在庫監視: 在庫情報を抽出できませんでした（${url.split('?')[0]}）\n\`--raw\` で構造を確認してください。`);
+      await notify('⚠️ Apple在庫監視: 在庫情報を抽出できませんでした。\n`--raw` で構造と店舗フィルタを確認してください。');
     }
     return;
   }
@@ -380,6 +426,7 @@ async function checkOnce(state) {
 
   const lines = inStock.map(({ r }) =>
     `• **${r.store}**${r.city ? `（${r.city}）` : ''} — ${r.part}${r.quote ? ` / ${r.quote}` : ''}`);
+  // 注: 同じ店舗が複数地点から返ることがあるため、通知は店舗×品番で1行にまとまる
   const heading = inStock.every(x => x.repeat) ? '🟢 **在庫あり（継続中）**' : '🟢 **在庫が出ました**';
 
   await notify(
@@ -394,7 +441,7 @@ async function checkOnce(state) {
 function requireConfig({ webhook = true } = {}) {
   const missing = [];
   if (!CFG.parts.length) missing.push('APPLE_PARTS（品番。--find-parts で探せます）');
-  if (!CFG.location) missing.push('APPLE_LOCATION（郵便番号や都市名。例 "150-0002"）');
+  if (!CFG.locations.length) missing.push('APPLE_LOCATION（郵便番号や都市名。カンマ区切りで複数可。例 "150-0002,210-0007"）');
   if (webhook && !CFG.webhook && !CFG.dryRun) missing.push('DISCORD_WEBHOOK_URL（DRY_RUN=1 なら不要）');
   if (missing.length) {
     console.error('必要な環境変数が未設定です:\n  - ' + missing.join('\n  - '));
@@ -409,7 +456,7 @@ async function main() {
   if (cmd === '--find-parts') return findParts(args[1] || '');
   if (cmd === '--raw') return raw();
   if (cmd === '--test') {
-    await notify(`✅ Apple在庫監視 テスト通知 (${ts()})\n品番: \`${CFG.parts.join(', ') || '(未設定)'}\`\nlocation: \`${CFG.location || '(未設定)'}\``);
+    await notify(`✅ Apple在庫監視 テスト通知 (${ts()})\n品番: \`${CFG.parts.join(', ') || '(未設定)'}\`\n地点: \`${CFG.locations.join(' / ') || '(未設定)'}\`\n店舗: \`${CFG.storeFilter.join(' / ') || '(絞り込みなし)'}\``);
     return console.log('テスト通知を送信しました');
   }
 
@@ -417,7 +464,8 @@ async function main() {
   const state = loadState();
 
   if (cmd === '--watch') {
-    console.log(`[${ts()}] 監視開始: ${CFG.parts.join(', ')} @ ${CFG.location} / ${CFG.intervalSec}秒間隔`);
+    console.log(`[${ts()}] 監視開始: ${CFG.parts.join(', ')} @ ${CFG.locations.join('/')} ` +
+      `${CFG.storeFilter.length ? `[${CFG.storeFilter.join('/')}]` : ''} / ${CFG.intervalSec}秒間隔`);
     for (;;) {
       await checkOnce(state);
       saveState(state);

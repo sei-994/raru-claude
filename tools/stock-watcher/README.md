@@ -46,6 +46,20 @@ MXYZ3J/A      256GB     ブラック          iPhone 18 Pro Max
 MXYZ5J/A      256GB     ホワイト          iPhone 18 Pro Max
 ```
 
+#### 調べた品番（2026-09-18 時点・要検証）
+
+iPhone 18 Pro Max 256GB / SIMフリー。**必ず `--find-parts` か `--raw` で裏を取ってください。**
+
+| 品番 | 色 | 確度 | 根拠 |
+|---|---|---|---|
+| `MJX74J/A` | バーガンディ | 高 | ヨドバシ商品ページのタイトルに明記 |
+| `MJX84J/A` | グレイシャー | 高 | エディオン商品ページのタイトルに明記 |
+| `MJX54J/A` | ブラック | 中 | 検索結果の要約のみ。商品ページのタイトルで未確認 |
+| `MJX64J/A` | シルバー | 中 | 同上 |
+
+> **キャリア版は品番が別です。** 上記はSIMフリー版です。ドコモ/au/ソフトバンク版を
+> 狙う場合は別の品番になるので、`--find-parts` で調べ直してください。
+
 **見つからない場合**（購入ページがJS描画だと起こり得ます）:
 ブラウザで構成を選び、「バッグに追加」後のカート画面か、URL の `product=` パラメータに出る
 `MXXXXJ/A` 形式の文字列を控えてください。
@@ -60,12 +74,21 @@ MXYZ5J/A      256GB     ホワイト          iPhone 18 Pro Max
 
 ### 3. 実物のレスポンスを確認する（最重要）
 
+Apple は `location` を**中心とした近隣店舗**を返します。離れた店舗（例: 渋谷と川崎）を
+両方見たい場合は、**地点をカンマ区切りで複数指定**してください。それぞれ問い合わせて結果を
+まとめます（同じ店舗が複数地点から返っても1件に統合されます）。
+
 ```bash
-export APPLE_PARTS="MXYZ3J/A"
-export APPLE_LOCATION="150-0002"    # 郵便番号。近隣店舗がこれを基準に返る
+export APPLE_PARTS="MJX54J/A"
+export APPLE_LOCATION="150-0041,160-0022,212-0013"   # 渋谷 / 新宿 / 川崎 の目安
+export STORE_FILTER="川崎,渋谷,新宿"                  # この3店舗だけ監視
 
 node apple-stock.js --raw
 ```
+
+`--raw` は「返ってきた店舗すべて」と「STORE_FILTER 適用後」の両方を出します。
+**郵便番号は目安なので、まず一覧を見て狙った3店舗が含まれているか確認してください。**
+含まれていなければ郵便番号を調整します。
 
 出力の見かた:
 
@@ -97,10 +120,11 @@ tail -f watch.log
 | 変数 | 既定値 | 説明 |
 |---|---|---|
 | `APPLE_PARTS` | （必須） | 品番。カンマ区切りで複数可 例 `MXYZ3J/A,MXYZ5J/A` |
-| `APPLE_LOCATION` | （必須） | 郵便番号や都市名 例 `150-0002` |
+| `APPLE_LOCATION` | （必須） | 郵便番号や都市名。**カンマ区切りで複数指定可** 例 `150-0041,160-0022,212-0013` |
 | `DISCORD_WEBHOOK_URL` | （必須） | Discord Webhook URL（`DRY_RUN=1` なら不要） |
+| `APPLE_LOCATIONS` | （空） | `APPLE_LOCATION` の別名。どちらで書いてもよい |
 | `APPLE_REGION` | `jp` | URLの地域セグメント。米国は空文字 |
-| `STORE_FILTER` | （空） | 店舗名の部分一致で絞る 例 `渋谷` |
+| `STORE_FILTER` | （空） | 店舗名の部分一致で絞る。**カンマ区切りでOR** 例 `川崎,渋谷,新宿` |
 | `APPLE_ENDPOINTS` | `/shop/retail/pickup-message,/shop/fulfillment-messages` | 試す順。カンマ区切り |
 | `APPLE_BUY_PAGE` | `{BASE}/shop/buy-iphone` | `--find-parts` が読むページ |
 | `INCLUDE_DELIVERY` | `0` | `1` でオンライン配送の可否も監視対象に含める |
@@ -112,7 +136,9 @@ tail -f watch.log
 
 ## 判定ロジック
 
-1. `APPLE_ENDPOINTS` を順に叩き、最初にJSONが返ったものを使う
+0. `APPLE_LOCATION` の各地点について、`APPLE_ENDPOINTS` を順に叩く。
+   1地点でも成功すれば続行し、失敗した地点は警告を出す（全滅した時だけエラー扱い）
+1. 各地点の結果を店舗×品番で重複排除してまとめる
 2. レスポンス全体を再帰探索し、`partsAvailability` を持つオブジェクトを全部拾う
    （店舗名は同じ階層の `storeName` / `storeDisplayName` から、なければ親から継承）
 3. 各店舗×品番について `pickupDisplay` を見る。`available` なら在庫あり
