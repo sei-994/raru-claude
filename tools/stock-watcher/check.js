@@ -250,6 +250,25 @@ async function scan(filter) {
     if (rows.length > 8) console.log(`    … 他 ${rows.length - 8} 行`);
   });
 
+  // 買取価格表（<table> に限らず div + CSS grid も見る。apple-stock.js --fetch-prices と同じパーサー）
+  console.log('\n▼ 買取価格表（見出しに「容量」がある表を構造非依存で検出）');
+  try {
+    const bb = require('./buyback').parseBuyback(html);
+    console.log(`  ${bb.rows.length}行 × ${bb.shops.length}店 / サイト側の更新 ${bb.updated || '(不明)'}`);
+    console.log(`  店: ${bb.shops.join(', ')}`);
+    const shown = filter ? bb.rows.filter(r => r.model.toLowerCase().includes(filter.toLowerCase())) : bb.rows;
+    for (const r of shown.slice(0, 12)) {
+      const ps = Object.entries(r.prices);
+      if (!ps.length) { console.log(`  ${r.model} ${r.capacity}: 価格なし`); continue; }
+      const hi = Math.max(...ps.map(p => p[1])), lo = Math.min(...ps.map(p => p[1]));
+      const who = v => ps.filter(p => p[1] === v).map(p => p[0]).join('/');
+      console.log(`  ${r.model} ${r.capacity}  定価 ${r.retail?.toLocaleString() ?? '-'}`
+        + `  最高 ${hi.toLocaleString()} ${who(hi)} / 最低 ${lo.toLocaleString()} ${who(lo)}  (${ps.length}店)`);
+    }
+  } catch (e) {
+    console.log('  見つかりません:', e.message);
+  }
+
   // 金額を含む行
   const rows = extractRows(html).filter(r => yenAmounts(r).length > 0);
   const hit = filter ? rows.filter(r => r.toLowerCase().includes(filter.toLowerCase())) : rows;

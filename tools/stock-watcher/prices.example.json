@@ -1,6 +1,8 @@
 {
   "_README": [
-    "このファイルを prices.json にコピーして金額を埋めてください。",
+    "通常は node apple-stock.js --fetch-prices で prices.json を自動生成してください。",
+    "  （labels と cost は Apple 公式、buyers は BUYBACK_URL の買取価格表から取得）",
+    "手で作る場合はこのファイルを prices.json にコピーして金額を埋めてください。",
     "  cp prices.example.json prices.json && open -e prices.json",
     "prices.json は .gitignore 済みです。",
     "",
@@ -18,25 +20,25 @@
     "MJX64J/A": "256GB シルバー",
     "MJX74J/A": "256GB バーガンディ",
     "MJX84J/A": "256GB グレイシャー",
-    "MJXA4J/A": "512GB ブラック",
-    "MJXB4J/A": "512GB シルバー",
+    "MJX94J/A": "512GB ブラック",
+    "MJXA4J/A": "512GB シルバー",
     "MJXC4J/A": "512GB バーガンディ",
     "MJXD4J/A": "512GB グレイシャー"
   },
 
   "cost": {
     "MJX54J/A": 0, "MJX64J/A": 0, "MJX74J/A": 0, "MJX84J/A": 0,
-    "MJXA4J/A": 0, "MJXB4J/A": 0, "MJXC4J/A": 0, "MJXD4J/A": 0
+    "MJX94J/A": 0, "MJXA4J/A": 0, "MJXC4J/A": 0, "MJXD4J/A": 0
   },
 
   "buyers": {
     "じゃんぱら": {
       "MJX54J/A": 0, "MJX64J/A": 0, "MJX74J/A": 0, "MJX84J/A": 0,
-      "MJXA4J/A": 0, "MJXB4J/A": 0, "MJXC4J/A": 0, "MJXD4J/A": 0
+      "MJX94J/A": 0, "MJXA4J/A": 0, "MJXC4J/A": 0, "MJXD4J/A": 0
     },
     "ゲオ": {
       "MJX54J/A": 0, "MJX64J/A": 0, "MJX74J/A": 0, "MJX84J/A": 0,
-      "MJXA4J/A": 0, "MJXB4J/A": 0, "MJXC4J/A": 0, "MJXD4J/A": 0
+      "MJX94J/A": 0, "MJXA4J/A": 0, "MJXC4J/A": 0, "MJXD4J/A": 0
     }
   }
 }

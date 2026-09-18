@@ -6,6 +6,7 @@
  *
  *   node apple-stock.js --doctor              設定から通知まで一気通貫で自己診断（まずこれ）
  *   node apple-stock.js --find-parts 256      購入ページから品番(MXXXXJ/A)を探す
+ *   node apple-stock.js --fetch-prices        定価と買取価格を取得して prices.json を更新
  *   node apple-stock.js --profit              買取価格と利益の一覧（ネット接続不要）
  *   node apple-stock.js --raw                 生JSONを保存して構造を確認する
  *   node apple-stock.js --check               1回チェック
@@ -15,6 +16,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { normCapacity, normModel } = require('./buyback');
 
 /** 同じディレクトリの .env を読む。実際の環境変数が優先される。 */
 function loadEnvFile() {
@@ -43,7 +45,11 @@ const CFG = {
     .split(',').map(s => s.trim()).filter(Boolean),
   // 店舗名の部分一致で絞る。カンマ区切りでOR 例 "川崎,渋谷,新宿"
   storeFilter: (process.env.STORE_FILTER || '').split(',').map(s => s.trim()).filter(Boolean),
-  buyPage: process.env.APPLE_BUY_PAGE || '',         // --find-parts 用
+  buyPage: process.env.APPLE_BUY_PAGE || '',         // --find-parts / --fetch-prices 用（空なら機種ページ）
+  // 買取価格の取得元（--fetch-prices）。非公式の集計サイトなので値は参考扱い
+  buybackUrl: process.env.BUYBACK_URL || 'https://is-checker.com/i18_stock_4.html?411',
+  // --watch 中に買取価格を取り直す間隔（分）。0 で自動更新しない
+  priceRefreshMin: Number(process.env.PRICE_REFRESH_MIN ?? 60),
   webhook: process.env.DISCORD_WEBHOOK_URL || '',
   mention: process.env.MENTION || '',
   intervalSec: Number(process.env.INTERVAL_SEC || 60),
@@ -57,23 +63,38 @@ const BASE = `https://www.apple.com${CFG.region ? '/' + CFG.region : ''}`;
 
 // --------------------------------------------------------- 表示名と買取価格
 // prices.json（任意）。無ければラベルは品番そのまま、利益計算は行わない。
+const PRICES_FILE = process.env.PRICES_FILE || path.join(__dirname, 'prices.json');
+
 function loadPrices() {
-  const f = process.env.PRICES_FILE || path.join(__dirname, 'prices.json');
-  if (!fs.existsSync(f)) return { file: null, labels: {}, cost: {}, buyers: {} };
+  const f = PRICES_FILE;
+  if (!fs.existsSync(f)) return { file: null, labels: {}, cost: {}, buyers: {}, meta: {} };
   try {
     const j = JSON.parse(fs.readFileSync(f, 'utf8'));
     return {
       file: f,
+      mtime: fs.statSync(f).mtimeMs,
       labels: j.labels || {},
       cost: j.cost || {},
       buyers: j.buyers || {},
+      meta: j._meta || {},
     };
   } catch (e) {
     console.error(`価格ファイルを読めません (${f}): ${e.message}`);
-    return { file: f, labels: {}, cost: {}, buyers: {}, error: e.message };
+    return { file: f, labels: {}, cost: {}, buyers: {}, meta: {}, error: e.message };
   }
 }
-const PRICES = loadPrices();
+let PRICES = loadPrices();
+
+/** --watch 中に prices.json が書き換わったら読み直す（再起動不要にするため） */
+function reloadPricesIfChanged() {
+  try {
+    if (!fs.existsSync(PRICES_FILE)) return;
+    if (fs.statSync(PRICES_FILE).mtimeMs !== PRICES.mtime) {
+      const next = loadPrices();
+      if (!next.error) PRICES = next;
+    }
+  } catch { /* 読めなければ前回の値で続行 */ }
+}
 
 /** 品番を人が読める名前に。未登録なら品番そのまま。 */
 function label(part) {
@@ -82,28 +103,49 @@ function label(part) {
 
 const yen = n => '¥' + Number(n).toLocaleString('ja-JP');
 
-/** その品番を一番高く買う店。未設定なら null。 */
-function bestOffer(part) {
-  let best = null;
+/**
+ * その品番の買取価格の最高値と最低値（同額の店はまとめる）。価格が1件も無ければ null。
+ * @returns {{ best: {buyers, price, profit}, worst: {buyers, price, profit}, cost, count } | null}
+ */
+function offers(part) {
+  const list = [];
   for (const [buyer, table] of Object.entries(PRICES.buyers)) {
     const price = Number(table?.[part] || 0);
-    if (price > 0 && (!best || price > best.price)) best = { buyer, price };
+    if (price > 0) list.push({ buyer, price });
   }
-  if (!best) return null;
-  const cost = Number(PRICES.cost[part] || 0);
-  return { ...best, cost: cost || null, profit: cost > 0 ? best.price - cost : null };
+  if (!list.length) return null;
+  const cost = Number(PRICES.cost[part] || 0) || null;
+  const pick = price => ({
+    buyers: list.filter(o => o.price === price).map(o => o.buyer),
+    price,
+    profit: cost ? price - cost : null,
+  });
+  const prices = list.map(o => o.price);
+  return { best: pick(Math.max(...prices)), worst: pick(Math.min(...prices)), cost, count: list.length };
+}
+
+const signedYen = n => (n >= 0 ? '+' : '−') + yen(Math.abs(n)).slice(1);
+const shopNames = (names, max = 2) =>
+  names.length > max ? `${names.slice(0, max).join('/')} 他${names.length - max}店` : names.join('/');
+
+/** 買取価格の出典。通知と表に必ず添える（非公式集計のため） */
+function priceSourceNote() {
+  const m = PRICES.meta || {};
+  if (!m.source) return '※ 買取価格は手入力の値です。';
+  const at = m.sourceUpdated || (m.fetchedAt || '').slice(0, 16).replace('T', ' ');
+  return `※ 買取価格は ${m.source} の非公式集計による参考値（${at} 時点）。各社の実際の買取額と異なる場合があります。`;
 }
 
 /** 在庫が出た品番について、買取見込みの行を組み立てる */
 function profitLines(parts) {
   const lines = [];
   for (const part of [...new Set(parts)]) {
-    const o = bestOffer(part);
+    const o = offers(part);
     if (!o) continue;
-    const profit = o.profit === null ? '仕入未設定'
-      : (o.profit >= 0 ? '+' : '−') + yen(Math.abs(o.profit)).slice(1);
-    lines.push(`${label(part)}　${o.cost ? `仕入 ${yen(o.cost)} → ` : ''}`
-      + `${o.buyer} ${yen(o.price)}（${profit}）`);
+    const fmt = x => `${shopNames(x.buyers)} ${yen(x.price)}${x.profit === null ? '' : `（${signedYen(x.profit)}）`}`;
+    lines.push(`${label(part)}${o.cost ? `　定価 ${yen(o.cost)}` : '　仕入未設定'}`);
+    lines.push(`  最高 ${fmt(o.best)}`);
+    if (o.worst.price !== o.best.price) lines.push(`  最低 ${fmt(o.worst)}`);
   }
   return lines;
 }
@@ -353,45 +395,83 @@ function saveState(s) {
 }
 
 // ----------------------------------------------------------------- 品番探索
-async function findParts(filter) {
-  const url = CFG.buyPage || `${BASE}/shop/buy-iphone`;
-  console.log('購入ページ:', url);
+const productPage = () => CFG.buyPage || `${BASE}/shop/buy-iphone/iphone-18-pro`;
+
+async function getHtml(url) {
   const res = await fetch(url, {
     headers: { 'User-Agent': UA, 'Accept': 'text/html', 'Accept-Language': 'ja-JP,ja;q=0.9' },
     signal: AbortSignal.timeout(25000),
   });
-  if (!res.ok) throw new Error(`HTTP ${res.status} — APPLE_BUY_PAGE で具体的な機種ページを指定してください`);
-  const html = await res.text();
-  console.log('HTML長:', html.length, 'bytes\n');
+  if (!res.ok) throw new Error(`HTTP ${res.status} (${url})`);
+  return res.text();
+}
 
-  const re = /"partNumber"\s*:\s*"([A-Z0-9]{3,8}(?:[A-Z]{1,3})?\/A)"/g;
+/** pos を含む最小の {...} を返す（文字列リテラル内の括弧は無視）。見つからなければ null */
+function enclosingObject(s, pos) {
+  for (let start = s.lastIndexOf('{', pos); start >= 0 && pos - start < 4000; start = s.lastIndexOf('{', start - 1)) {
+    let depth = 0, inStr = false;
+    for (let i = start; i < s.length && i - start < 8000; i++) {
+      const c = s[i];
+      if (inStr) { if (c === '\\') i++; else if (c === '"') inStr = false; continue; }
+      if (c === '"') inStr = true;
+      else if (c === '{') depth++;
+      else if (c === '}' && --depth === 0) {
+        if (i < pos) break;                // pos を含まない（手前で閉じた）→ さらに外側へ
+        try { return JSON.parse(s.slice(start, i + 1)); } catch { break; }
+      }
+    }
+  }
+  return null;
+}
+
+/** オブジェクトを再帰探索し、最初に見つかった key の値を返す */
+function findKey(o, keys, depth = 0) {
+  if (!o || typeof o !== 'object' || depth > 4) return undefined;
+  for (const k of keys) if (o[k] !== undefined && typeof o[k] !== 'object') return o[k];
+  for (const v of Object.values(o)) {
+    const r = findKey(v, keys, depth + 1);
+    if (r !== undefined) return r;
+  }
+  return undefined;
+}
+
+/**
+ * Apple の機種ページから品番ごとの名称・容量・色・定価を取り出す。
+ * JSON の階層やキー順は決め打ちせず、"partNumber" を含む最小のオブジェクトを丸ごと読む。
+ * （以前は品番の「近く」の文字列を拾っていたため、隣の商品の名前を取り違えていた）
+ */
+function extractProducts(html) {
+  const re = /"partNumber"\s*:\s*"([A-Z0-9]{3,8}\/A)"/g;
   const seen = new Map();
   let m;
   while ((m = re.exec(html))) {
     const part = m[1];
-    if (seen.has(part)) continue;
-    const start = Math.max(0, m.index - 600);
-    const win = html.slice(start, m.index + 600);
-    const rel = m.index - start;
-    // 窓内に同じキーが複数あるため、品番の位置に「最も近い」出現を採用する
-    const grab = k => {
-      const re2 = new RegExp(`"${k}"\\s*:\\s*"([^"]{1,60})"`, 'g');
-      let best = '', bestDist = Infinity, mm;
-      while ((mm = re2.exec(win))) {
-        const d = Math.abs(mm.index - rel);
-        if (d < bestDist) { bestDist = d; best = mm[1]; }
-      }
-      return best;
-    };
+    if (seen.get(part)?.title) continue;
+    const o = enclosingObject(html, m.index);
+    if (!o) continue;
+    // 名称にノーブレークスペースが混ざるので普通の空白にそろえる（"Pro Max" で検索できるように）
+    const title = String(findKey(o, ['name', 'productTitle', 'displayName', 'title']) || '').replace(/\s+/g, ' ').trim();
+    const price = Number(findKey(o, ['fullPrice', 'amount', 'currentPrice']) || 0) || null;
+    const cm = title.match(/^(.*?)\s*(\d+\s*(?:GB|TB))\s*(.*)$/i);
     seen.set(part, {
       part,
-      capacity: grab('dimensionCapacity') || grab('capacity'),
-      color: grab('dimensionColor') || grab('color'),
-      title: grab('productTitle') || grab('name') || grab('displayName'),
+      title,
+      model: cm ? cm[1].trim() : '',
+      capacity: cm ? normCapacity(cm[2]) : (findKey(o, ['dimensionCapacity', 'capacity']) || ''),
+      color: cm ? cm[3].trim() : (findKey(o, ['dimensionColor', 'color']) || ''),
+      price,
     });
   }
+  return [...seen.values()].filter(p => p.title);
+}
 
-  let list = [...seen.values()];
+async function findParts(filter) {
+  const url = productPage();
+  console.log('購入ページ:', url);
+  const html = await getHtml(url);
+  console.log('HTML長:', html.length, 'bytes\n');
+
+  let list = extractProducts(html);
   if (filter) {
     const f = filter.toLowerCase();
     list = list.filter(r => Object.values(r).join(' ').toLowerCase().includes(f));
@@ -407,12 +487,82 @@ async function findParts(filter) {
   }
 
   console.log(`見つかった品番: ${list.length}件${filter ? ` (フィルタ: ${filter})` : ''}\n`);
-  console.log('品番'.padEnd(14) + '容量'.padEnd(10) + '色'.padEnd(16) + '名称');
-  console.log('-'.repeat(78));
+  list.sort((a, b) => a.title.localeCompare(b.title));
+  console.log('品番'.padEnd(12) + '定価'.padEnd(12) + '名称');
+  console.log('-'.repeat(72));
   for (const r of list) {
-    console.log(r.part.padEnd(14) + (r.capacity || '-').padEnd(10) + (r.color || '-').padEnd(16) + (r.title || '-').slice(0, 34));
+    console.log(r.part.padEnd(12) + (r.price ? yen(r.price) : '-').padEnd(12) + r.title);
   }
   console.log('\nこの品番を APPLE_PARTS に設定してください。');
+}
+
+// ------------------------------------------------------------ 価格の自動取得
+/**
+ * prices.json を実データで更新する。
+ *   labels / cost : Apple 公式の機種ページ（名称と定価）。手で入れた値は上書きしない
+ *   buyers        : BUYBACK_URL の買取価格表。毎回取り直して置き換える
+ *
+ * 買取表は「機種×容量」単位で、色は区別されない。そのため同じ容量の色違いには同じ価格が入る。
+ * 表に無い機種・容量の品番には何も入れない（推測で埋めない）。
+ */
+async function fetchPrices({ quiet = false } = {}) {
+  const log = quiet ? () => {} : console.log;
+  const cur = fs.existsSync(PRICES_FILE) ? JSON.parse(fs.readFileSync(PRICES_FILE, 'utf8')) : {};
+  const parts = CFG.parts.length ? CFG.parts : Object.keys(cur.labels || {});
+  if (!parts.length) throw new Error('APPLE_PARTS が未設定です');
+
+  // 1. Apple: 品番 → 機種・容量・定価
+  const products = new Map(extractProducts(await getHtml(productPage())).map(p => [p.part, p]));
+  const known = parts.filter(p => products.has(p));
+  const unknown = parts.filter(p => !products.has(p));
+  log(`Apple 機種ページ: ${productPage()}`);
+  log(`  品番 ${parts.length}件中 ${known.length}件を確認${unknown.length ? `（見つからない: ${unknown.join(', ')}）` : ''}`);
+
+  // 2. 買取価格表
+  const { parseBuyback } = require('./buyback');
+  const table = parseBuyback(await getHtml(CFG.buybackUrl));
+  log(`買取価格表: ${CFG.buybackUrl}`);
+  log(`  ${table.rows.length}行 × ${table.shops.length}店 / サイト側の更新 ${table.updated || '(不明)'}`);
+
+  const labels = { ...(cur.labels || {}) };
+  const cost = { ...(cur.cost || {}) };
+  const buyers = {};
+  const unmatched = [];
+  for (const part of known) {
+    const p = products.get(part);
+    if (!labels[part]) labels[part] = `${p.capacity} ${p.color}`.trim();
+    if (!Number(cost[part]) && p.price) cost[part] = p.price;
+    const row = table.rows.find(r => normModel(r.model) === normModel(p.model) && r.capacity === p.capacity);
+    if (!row) { unmatched.push(`${part}(${p.title})`); continue; }
+    for (const [shop, price] of Object.entries(row.prices)) {
+      (buyers[shop] ||= {})[part] = price;
+    }
+  }
+  if (unmatched.length) log(`  買取表に該当行なし: ${unmatched.join(', ')}`);
+
+  const out = {
+    _README: [
+      'node apple-stock.js --fetch-prices で自動生成・更新されるファイルです。',
+      'labels / cost は空欄のときだけ Apple 公式の値で埋めます。手で書き換えた値は保持されます。',
+      'buyers は毎回取り直して置き換えます。',
+      '買取価格は非公式の集計サイトの値で、色の区別はありません（同じ容量なら同じ価格）。',
+    ],
+    _meta: {
+      source: new URL(CFG.buybackUrl).hostname,
+      sourceUrl: CFG.buybackUrl,
+      sourceUpdated: table.updated,
+      fetchedAt: new Date().toISOString(),
+      costSource: productPage(),
+      colorSpecific: false,
+    },
+    labels,
+    cost,
+    buyers,
+  };
+  fs.writeFileSync(PRICES_FILE, JSON.stringify(out, null, 2) + '\n');
+  PRICES = loadPrices();
+  log(`書き込み: ${PRICES_FILE}（買取店 ${Object.keys(buyers).length}店）`);
+  return { unknown, unmatched };
 }
 
 // ------------------------------------------------------------------ raw出力
@@ -479,33 +629,30 @@ function showProfit() {
     return String(str) + ' '.repeat(Math.max(0, w - width));
   };
 
-  console.log('='.repeat(86));
-  console.log('買取価格と利益  (価格ファイル:', PRICES.file + ')');
-  console.log('='.repeat(86));
-  console.log(pad('機種', 24) + pad('仕入', 12) + buyers.map(b => pad(b, 14)).join('') + '最高値との差');
-  console.log('-'.repeat(86));
+  const W = 100;
+  console.log('='.repeat(W));
+  console.log(`買取価格と利益  (価格ファイル: ${PRICES.file} / 買取店 ${buyers.length}店)`);
+  console.log('='.repeat(W));
+  console.log(pad('機種', 22) + pad('仕入', 11) + pad('最高値（利益）', 34) + '最低値（利益）');
+  console.log('-'.repeat(W));
 
   let anyPrice = false;
   for (const part of parts) {
     const cost = Number(PRICES.cost[part] || 0);
-    const best = bestOffer(part);
-    if (best) anyPrice = true;
-    const cells = buyers.map(b => {
-      const v = Number(PRICES.buyers[b]?.[part] || 0);
-      return pad(v > 0 ? yen(v) : '-', 14);
-    });
-    const diff = !best ? '-'
-      : best.profit === null ? `${best.buyer}（仕入未設定）`
-      : `${best.profit >= 0 ? '+' : '−'}${yen(Math.abs(best.profit)).slice(1)}  ${best.buyer}`;
-    console.log(pad(label(part), 24) + pad(cost > 0 ? yen(cost) : '-', 12) + cells.join('') + diff);
+    const o = offers(part);
+    if (o) anyPrice = true;
+    const cell = x => `${yen(x.price)}${x.profit === null ? '' : `(${signedYen(x.profit)})`} ${shopNames(x.buyers)}`;
+    console.log(pad(label(part), 22) + pad(cost > 0 ? yen(cost) : '-', 11)
+      + (o ? pad(cell(o.best), 34) + ' ' + cell(o.worst) : '買取価格なし'));
   }
-  console.log('='.repeat(86));
+  console.log('='.repeat(W));
   if (!anyPrice) {
-    console.log('買取価格が1件も入っていません。prices.json の buyers を埋めてください。');
+    console.log('買取価格が1件も入っていません。node apple-stock.js --fetch-prices で取得してください。');
   } else if (parts.some(p => !Number(PRICES.cost[p]))) {
     console.log('※ 仕入価格が未設定の品番があります。利益を出すには cost を埋めてください。');
   }
-  console.log('この表は手入力した価格に基づきます。相場は日々変わるので、都度更新してください。');
+  console.log(priceSourceNote());
+  if (PRICES.meta?.colorSpecific === false) console.log('※ 取得元の買取表は色を区別していません（同じ容量なら同じ価格）。');
 }
 
 // ------------------------------------------------------------------ doctor
@@ -527,7 +674,14 @@ async function doctor() {
   const nCost = Object.values(PRICES.cost).filter(v => Number(v) > 0).length;
   console.log('価格ファイル :', PRICES.file
     ? `${PRICES.file} (仕入 ${nCost}件 / 買取店 ${nBuyers}店)`
-    : '(なし。--profit と買取見込みは無効)');
+    : '(なし。--fetch-prices で作成できます)');
+  if (PRICES.meta?.fetchedAt) {
+    console.log('買取価格     :', `${PRICES.meta.source} ${PRICES.meta.sourceUpdated || ''} 時点`
+      + `（取得 ${PRICES.meta.fetchedAt.slice(0, 16).replace('T', ' ')} UTC）`);
+    const ageH = (Date.now() - Date.parse(PRICES.meta.fetchedAt)) / 3600e3;
+    if (ageH > 24) warns.push(`買取価格が ${Math.floor(ageH)} 時間前のものです。--fetch-prices で更新してください`);
+  }
+  if (PRICES.error) warns.push(`prices.json が壊れています: ${PRICES.error}`);
 
   if (!CFG.parts.length) problems.push('APPLE_PARTS が未設定です（--find-parts で品番を調べてください）');
   if (!CFG.locations.length) problems.push('APPLE_LOCATION が未設定です');
@@ -678,6 +832,7 @@ function rowKey(r) {
 }
 
 async function checkOnce(state) {
+  reloadPricesIfChanged();
   let results;
   try {
     results = await fetchAllLocations();
@@ -747,7 +902,9 @@ async function checkOnce(state) {
   await notify(
     `${heading}\n` +
     lines.join('\n') +
-    (profit.length ? '\n\n💰 **買取見込み（最高値の店）**\n```\n' + profit.join('\n') + '\n```' : '\n') +
+    (profit.length
+      ? '\n\n💰 **買取見込み（参考値）**\n```\n' + profit.join('\n') + '\n```\n' + priceSourceNote() + '\n'
+      : '\n') +
     `\n${BASE}/shop/buy-iphone`
   );
   console.log(`[${ts()}] 通知送信: ${byStore.size}店舗 / ${inStock.length}件`);
@@ -773,8 +930,15 @@ async function main() {
   if (cmd === '--raw') return raw();
   if (cmd === '--doctor') return doctor();
   if (cmd === '--profit') return showProfit();
+  if (cmd === '--fetch-prices') {
+    await fetchPrices();
+    console.log('');
+    return showProfit();
+  }
   if (cmd === '--test') {
-    await notify(`✅ Apple在庫監視 テスト通知 (${ts()})\n品番: \`${CFG.parts.join(', ') || '(未設定)'}\`\n地点: \`${CFG.locations.join(' / ') || '(未設定)'}\`\n店舗: \`${CFG.storeFilter.join(' / ') || '(絞り込みなし)'}\``);
+    const profit = profitLines(CFG.parts);
+    await notify(`✅ Apple在庫監視 テスト通知 (${ts()})\n品番: \`${CFG.parts.map(label).join(', ') || '(未設定)'}\`\n地点: \`${CFG.locations.join(' / ') || '(未設定)'}\`\n店舗: \`${CFG.storeFilter.join(' / ') || '(絞り込みなし)'}\``
+      + (profit.length ? '\n\n💰 **買取見込み（参考値）** ※在庫通知ではこの形で付きます\n```\n' + profit.join('\n') + '\n```\n' + priceSourceNote() : ''));
     return console.log('テスト通知を送信しました');
   }
 
@@ -784,7 +948,18 @@ async function main() {
   if (cmd === '--watch') {
     console.log(`[${ts()}] 監視開始: ${CFG.parts.join(', ')} @ ${CFG.locations.join('/')} ` +
       `${CFG.storeFilter.length ? `[${CFG.storeFilter.join('/')}]` : ''} / ${CFG.intervalSec}秒間隔`);
+    let pricesAt = 0;
     for (;;) {
+      // 買取価格の定期更新。失敗しても在庫監視は続け、前回の価格を使う
+      if (CFG.priceRefreshMin > 0 && Date.now() - pricesAt > CFG.priceRefreshMin * 60 * 1000) {
+        pricesAt = Date.now();
+        try {
+          await fetchPrices({ quiet: true });
+          console.log(`[${ts()}] 買取価格を更新（${PRICES.meta.source} ${PRICES.meta.sourceUpdated || ''} 時点 / ${Object.keys(PRICES.buyers).length}店）`);
+        } catch (e) {
+          console.error(`[${ts()}] 買取価格の更新に失敗（前回の値で継続）: ${e.message}`);
+        }
+      }
       try {
         await checkOnce(state);
         saveState(state);
