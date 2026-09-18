@@ -4,6 +4,7 @@
  *
  * 依存ゼロ (Node 18+ の global fetch を使用)
  *
+ *   node check.js --scan     ページに何が載っているか吐き出す（買取価格の構造確認）
  *   node check.js --dump     ページ構造を確認する（通知しない / 最初にこれを実行する）
  *   node check.js --test     Discord への疎通テスト
  *   DRY_RUN=1 node check.js  送信せずに通知内容だけ確認
@@ -192,6 +193,83 @@ function saveState(s) {
 }
 
 // ---------- モード ----------
+// ---------------------------------------------------------------- scan
+// ページに何が載っているかを吐き出す。買取価格などの構造を確認するため。
+// 出力はそのまま貼れる程度の量に収める。
+const YEN_RE = /(?:¥|￥)\s?([0-9][0-9,]{2,})|([0-9][0-9,]{3,})\s?円/g;
+
+function yenAmounts(text) {
+  const out = [];
+  let m;
+  YEN_RE.lastIndex = 0;
+  while ((m = YEN_RE.exec(text))) {
+    const n = Number((m[1] || m[2]).replace(/,/g, ''));
+    if (n >= 1000 && n <= 10000000) out.push(n);
+  }
+  return out;
+}
+
+async function scan(filter) {
+  const html = await fetchPage();
+  const clean = html
+    .replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ');
+
+  const title = (html.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [])[1] || '(なし)';
+  const allText = toText(clean);
+  const allYen = yenAmounts(allText);
+
+  console.log('='.repeat(72));
+  console.log('URL      :', CFG.url);
+  console.log('タイトル :', decodeEntities(title).trim().slice(0, 80));
+  console.log('HTML長   :', html.length, 'bytes');
+  console.log('='.repeat(72));
+
+  console.log('\n▼ 何が載っているか');
+  console.log('  金額らしき数値の総数 :', allYen.length,
+    allYen.length ? `(最小 ${Math.min(...allYen).toLocaleString()} / 最大 ${Math.max(...allYen).toLocaleString()})` : '');
+  for (const kw of ['買取', '在庫', '価格', '相場', '店舗', '容量', 'Pro Max']) {
+    const n = (allText.match(new RegExp(kw, 'g')) || []).length;
+    console.log(`  「${kw}」の出現回数`.padEnd(22) + ': ' + n);
+  }
+  console.log('  生HTMLに "Pro Max" :', /pro\s*max/i.test(html) ? 'あり' : 'なし ← JSで描画されている可能性');
+
+  if (!allYen.length) {
+    console.log('\n  ※ 金額が1件も見つかりません。このページに買取価格は載っていないか、');
+    console.log('     JavaScriptで後から描画されています。下の「外部リソース」を確認してください。');
+  }
+
+  // テーブル構造
+  const tables = clean.match(/<table[\s\S]*?<\/table>/gi) || [];
+  console.log(`\n▼ テーブル: ${tables.length}個`);
+  tables.slice(0, 5).forEach((t, i) => {
+    const rows = (t.match(/<tr[\s\S]*?<\/tr>/gi) || []).map(toText).filter(Boolean);
+    console.log(`\n  [テーブル${i}] ${rows.length}行`);
+    rows.slice(0, 8).forEach((r, j) => console.log(`    ${j}: ${r.slice(0, 160)}`));
+    if (rows.length > 8) console.log(`    … 他 ${rows.length - 8} 行`);
+  });
+
+  // 金額を含む行
+  const rows = extractRows(html).filter(r => yenAmounts(r).length > 0);
+  const hit = filter ? rows.filter(r => r.toLowerCase().includes(filter.toLowerCase())) : rows;
+  console.log(`\n▼ 金額を含む行: ${rows.length}行` + (filter ? ` (「${filter}」で絞ると ${hit.length}行)` : ''));
+  hit.slice(0, 12).forEach((r, i) => {
+    const a = yenAmounts(r);
+    console.log(`  [${i}] 最大 ${Math.max(...a).toLocaleString()} / 最小 ${Math.min(...a).toLocaleString()}  (${a.length}件)`);
+    console.log(`      ${r.slice(0, 200)}`);
+  });
+  if (hit.length > 12) console.log(`  … 他 ${hit.length - 12} 行`);
+
+  console.log('\n▼ 外部リソース（JS描画ならこの先にデータがある）');
+  const apis = [...new Set((html.match(/["'`]([^"'`\s]*\.(?:json|php|cgi|api)(?:\?[^"'`\s]*)?)["'`]/gi) || []))];
+  console.log('  json/php/cgi:', apis.length ? '\n    ' + apis.slice(0, 12).join('\n    ') : '(なし)');
+  const srcs = [...new Set((html.match(/<script[^>]+src=["']([^"']+)["']/gi) || []))];
+  console.log('  script src  :', srcs.length ? '\n    ' + srcs.slice(0, 12).join('\n    ') : '(なし)');
+  console.log('\n' + '='.repeat(72));
+  console.log('この出力をそのまま貼ってください。構造に合わせたパーサーを書きます。');
+}
+
 async function dump() {
   const html = await fetchPage();
   const rows = extractRows(html);
@@ -301,6 +379,7 @@ async function main() {
   const arg = process.argv[2] || '';
 
   if (arg === '--dump') return dump();
+  if (arg === '--scan') return scan(process.argv[3] || '');
 
   if (arg === '--test') {
     await notify(`✅ 在庫監視テスト通知 (${ts()})\n監視対象: \`${CFG.keywords.join(' + ')}\`\n${CFG.url}`);
