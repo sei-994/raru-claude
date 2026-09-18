@@ -248,8 +248,10 @@ function isInStock(row) {
 function applyStoreFilter(rows) {
   if (!CFG.storeFilter.length) return rows;
   const fs_ = CFG.storeFilter.map(f => f.toLowerCase());
+  // 店舗名だけで判定する。住所(city)まで含めると、例えば "渋谷" が
+  // 渋谷区にある表参道店にもマッチしてしまい、指定していない店舗が混ざる。
   return rows.filter(r =>
-    r.kind === 'delivery' || fs_.some(f => `${r.store} ${r.city}`.toLowerCase().includes(f)));
+    r.kind === 'delivery' || fs_.some(f => r.store.toLowerCase().includes(f)));
 }
 
 // ------------------------------------------------------------------ Discord
