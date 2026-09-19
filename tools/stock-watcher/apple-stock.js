@@ -352,12 +352,14 @@ function applyStoreFilter(rows) {
 
 // ------------------------------------------------------------------ Discord
 async function notify(content) {
-  if (!CFG.webhook || CFG.dryRun) {
-    console.log(`[DRY RUN / 未送信]\n${content}\n`);
-    return;
-  }
+  // メンションを先に組み立てる。DRY RUN の表示が実際の送信内容と一致するように。
   let text = (CFG.mention ? CFG.mention + ' ' : '') + content;
   if (text.length > 1900) text = text.slice(0, 1890) + '\n…（省略）';
+
+  if (!CFG.webhook || CFG.dryRun) {
+    console.log(`[DRY RUN / 未送信]\n${text}\n`);
+    return;
+  }
   const body = JSON.stringify({
     content: text,
     allowed_mentions: { parse: ['everyone', 'users', 'roles'] },
