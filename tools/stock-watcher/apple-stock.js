@@ -848,13 +848,38 @@ async function checkOnce(state) {
     return;
   }
 
-  let rows = applyStoreFilter(mergeRows(results, { delivery: CFG.includeDelivery }));
+  const allRows = mergeRows(results, { delivery: CFG.includeDelivery });
+  let rows = applyStoreFilter(allRows);
 
   if (!rows.length) {
-    console.error(`[${ts()}] 抽出0件 — レスポンス構造が変わった可能性`);
+    // 「Appleが何も返さなかった」のか「店舗フィルタで全部落ちた」のかで対処が違うため、
+    // どちらなのかと、手がかりになる実際の値を必ず添える。
+    const stores = [...new Set(allRows.map(r => r.store))];
+    const gotParts = [...new Set(allRows.map(r => r.part))];
+    const missing = CFG.parts.filter(p => !gotParts.includes(p));
+
+    let why, fix;
+    if (!allRows.length) {
+      why = 'Appleの応答に在庫情報(partsAvailability)が1件もありません。';
+      fix = `品番が誤っているか、応答の構造が変わった可能性があります。\n`
+        + `指定中の品番: ${CFG.parts.join(', ')}\n`
+        + '`node apple-stock.js --doctor` の [2/4] で、どの品番が無効か分かります。';
+    } else {
+      why = `店舗は ${stores.length} 件返っていますが、店舗フィルタに一致しませんでした。`;
+      fix = `返ってきた店舗: ${stores.join(', ')}\n`
+        + `STORE_FILTER: ${CFG.storeFilter.join(', ') || '(未設定)'}\n`
+        + '.env の STORE_FILTER を、上の店舗名の表記に合わせてください。';
+    }
+    if (missing.length) {
+      fix += `\n応答に出てこない品番: ${missing.join(', ')}`;
+    }
+
+    console.error(`[${ts()}] 抽出0件 — ${why}`);
+    console.error(fix.split('\n').map(l => '  ' + l).join('\n'));
+
     if (Date.now() - (state.emptyAt || 0) > 60 * 60 * 1000) {
       state.emptyAt = Date.now();
-      await notify('⚠️ Apple在庫監視: 在庫情報を抽出できませんでした。\n`--raw` で構造と店舗フィルタを確認してください。');
+      await notify(`⚠️ **Apple在庫監視: 在庫情報を抽出できませんでした**\n${why}\n\`\`\`\n${fix}\n\`\`\``);
     }
     return;
   }
