@@ -210,16 +210,23 @@ async function getJson(url) {
 }
 
 /** 1地点について、複数エンドポイントを順に試し最初に成功したものを返す */
+// 541/403/429 は「叩きすぎて弾かれた」系。通常の失敗とは待ち方を変える必要がある。
+const BLOCK_STATUS = [541, 403, 429];
+
 async function fetchOneLocation(location) {
   const errors = [];
+  let blocked = false;
   for (const url of endpointUrls(location)) {
     try {
       return { json: await getJson(url), url, location };
     } catch (e) {
+      if (BLOCK_STATUS.includes(e.status)) blocked = true;
       errors.push(`${url.split('?')[0]} → ${e.message}`);
     }
   }
-  throw new Error(`[${location || '地点未指定'}] 全エンドポイントが失敗:\n    ` + errors.join('\n    '));
+  throw Object.assign(
+    new Error(`[${location || '地点未指定'}] 全エンドポイントが失敗:\n    ` + errors.join('\n    ')),
+    { blocked });
 }
 
 /**
@@ -229,15 +236,20 @@ async function fetchOneLocation(location) {
  */
 async function fetchAllLocations() {
   const results = [], errors = [];
+  let blockedAny = false;
   for (const [i, loc] of CFG.locations.entries()) {
     if (i > 0) await sleep(800);   // 連続アクセスを避ける
     try {
       results.push(await fetchOneLocation(loc));
     } catch (e) {
+      if (e.blocked) blockedAny = true;
       errors.push(e.message);
     }
   }
-  if (!results.length) throw new Error('全地点で取得失敗:\n  ' + errors.join('\n  '));
+  if (!results.length) {
+    throw Object.assign(new Error('全地点で取得失敗:\n  ' + errors.join('\n  ')),
+      { blocked: blockedAny });
+  }
   if (errors.length) console.error('一部の地点で取得失敗:\n  ' + errors.join('\n  '));
   return results;
 }
@@ -839,11 +851,23 @@ async function checkOnce(state) {
   try {
     results = await fetchAllLocations();
     state.failStreak = 0;
+    state.blocked = false;
   } catch (e) {
     state.failStreak = (state.failStreak || 0) + 1;
+    state.blocked = !!e.blocked;
     console.error(`[${ts()}] 取得失敗 (${state.failStreak}回連続): ${e.message}`);
-    if (state.failStreak === 5) {
-      await notify(`⚠️ Apple在庫監視: 5回連続で取得に失敗しています\n\`\`\`\n${e.message.slice(0, 800)}\n\`\`\``);
+
+    // ブロック系は2回目で知らせる（長い待機に入るため、黙っている時間が長くなる）
+    const shouldNotify = e.blocked ? state.failStreak === 2 : state.failStreak === 5;
+    if (shouldNotify) {
+      const note = e.blocked
+        ? '\n**アクセス過多で弾かれている可能性が高いです。**\n'
+          + '監視は自動で待機間隔を延ばしますが、復帰しない場合は一度停止してください:\n'
+          + '`pkill -f apple-stock.js`\n'
+          + '再開するときは .env の INTERVAL_SEC を 300 以上にしてください。'
+        : '';
+      await notify(`⚠️ Apple在庫監視: ${state.failStreak}回連続で取得に失敗しています\n`
+        + `\`\`\`\n${e.message.slice(0, 700)}\n\`\`\`${note}`);
     }
     return;
   }
@@ -995,10 +1019,19 @@ async function main() {
         state.failStreak = (state.failStreak || 0) + 1;
         console.error(`[${ts()}] 想定外のエラー (${state.failStreak}回連続): ${e.message}`);
       }
-      // 連続失敗中は間隔を伸ばす（403/レート制限で叩き続けないため。最大8倍）
-      const backoff = Math.min(2 ** (state.failStreak || 0), 8);
-      const base = CFG.intervalSec * backoff;
-      if (backoff > 1) console.error(`[${ts()}] 次回まで ${base}秒 待機（バックオフ x${backoff}）`);
+      // 待機時間の決め方は失敗の種類で変える。
+      // 541/403/429（弾かれている）で短い間隔を続けるとブロックが解けないため、
+      // 通常の指数バックオフ（最大8倍＝数分）ではなく、分単位で大きく空ける。
+      let base;
+      if (state.blocked && state.failStreak > 0) {
+        const mins = Math.min(30 * 2 ** (state.failStreak - 1), 240);
+        base = mins * 60;
+        console.error(`[${ts()}] アクセスを弾かれています。次回まで ${mins}分 待機します`);
+      } else {
+        const backoff = Math.min(2 ** (state.failStreak || 0), 8);
+        base = CFG.intervalSec * backoff;
+        if (backoff > 1) console.error(`[${ts()}] 次回まで ${base}秒 待機（バックオフ x${backoff}）`);
+      }
       const jitter = Math.floor((Math.random() - 0.5) * base * 0.3 * 1000);
       await sleep(base * 1000 + jitter);
     }
