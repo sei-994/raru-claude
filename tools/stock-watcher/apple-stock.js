@@ -5,6 +5,7 @@
  * 依存ゼロ (Node 18+ の global fetch)
  *
  *   node apple-stock.js --doctor              設定から通知まで一気通貫で自己診断（まずこれ）
+ *   node apple-stock.js --probe               1リクエストだけ投げて、いま繋がるか確認
  *   node apple-stock.js --find-parts 256      購入ページから品番(MXXXXJ/A)を探す
  *   node apple-stock.js --fetch-prices        定価と買取価格を取得して prices.json を更新
  *   node apple-stock.js --profit              買取価格と利益の一覧（ネット接続不要）
@@ -52,11 +53,14 @@ const CFG = {
   priceRefreshMin: Number(process.env.PRICE_REFRESH_MIN ?? 60),
   webhook: process.env.DISCORD_WEBHOOK_URL || '',
   mention: process.env.MENTION || '',
-  intervalSec: Number(process.env.INTERVAL_SEC || 60),
+  // 既定は5分。60秒で回し続けて Apple に 541 で弾かれた経緯があるため。
+  intervalSec: Number(process.env.INTERVAL_SEC || 300),
   repeatMin: Number(process.env.REPEAT_MIN || 30),
   includeDelivery: process.env.INCLUDE_DELIVERY === '1',
   stateFile: process.env.STATE_FILE || path.join(__dirname, 'apple-state.json'),
   dryRun: process.env.DRY_RUN === '1',
+  // 弾かれたときの初回待機（分）。以降2倍ずつ、上限は8倍。
+  blockCooldownMin: Number(process.env.BLOCK_COOLDOWN_MIN || 30),
 };
 
 const BASE = `https://www.apple.com${CFG.region ? '/' + CFG.region : ''}`;
@@ -669,6 +673,50 @@ function showProfit() {
   if (PRICES.meta?.colorSpecific === false) console.log('※ 取得元の買取表は色を区別していません（同じ容量なら同じ価格）。');
 }
 
+// ------------------------------------------------------------------- probe
+// 1リクエストだけ投げて、いまアクセスできるかを判定する。
+// ブロックが解けたかを、監視を動かさずに確認するため。状態も通知も変更しない。
+async function probe() {
+  if (!CFG.parts.length || !CFG.locations.length) {
+    console.error('APPLE_PARTS と APPLE_LOCATION を設定してください');
+    process.exitCode = 1;
+    return;
+  }
+  const location = CFG.locations[0];
+  const url = endpointUrls(location)[0];
+  console.log('確認先:', url.split('?')[0]);
+  console.log('地点  :', location);
+  console.log('品番  :', CFG.parts[0], CFG.parts.length > 1 ? `他${CFG.parts.length - 1}件` : '');
+  console.log('-'.repeat(60));
+
+  const t0 = Date.now();
+  try {
+    const json = await getJson(url);
+    const rows = extractPickup(json);
+    const stores = [...new Set(rows.map(r => r.store))];
+    console.log(`✓ 応答あり (${Date.now() - t0}ms)`);
+    console.log(`  店舗 ${stores.length}件: ${stores.join(', ') || '(なし)'}`);
+    if (!stores.length) {
+      console.log('\n応答は返りましたが在庫情報がありません。--doctor で品番を確認してください。');
+      process.exitCode = 1;
+      return;
+    }
+    console.log(`  在庫あり: ${rows.filter(isInStock).length}件`);
+    console.log('\n判定: 復帰しています。監視を再開できます。');
+    console.log('  nohup caffeinate -is node apple-stock.js --watch >> watch.log 2>&1 &');
+  } catch (e) {
+    console.log(`✗ ${e.message}`);
+    if (BLOCK_STATUS.includes(e.status)) {
+      console.log('\n判定: まだ弾かれています。');
+      console.log('  時間を置いてから、もう一度 --probe を実行してください。');
+      console.log('  この確認は1リクエストだけなので、間隔を空ければ再試行しても安全です。');
+    } else {
+      console.log('\n判定: 取得できません。--doctor で詳しく調べてください。');
+    }
+    process.exitCode = 1;
+  }
+}
+
 // ------------------------------------------------------------------ doctor
 // 設定から実際の通知までを一気通貫で自己診断し、次にやることを指示する。
 async function doctor() {
@@ -980,6 +1028,7 @@ async function main() {
   if (cmd === '--find-parts') return findParts(args[1] || '');
   if (cmd === '--raw') return raw();
   if (cmd === '--doctor') return doctor();
+  if (cmd === '--probe') return probe();
   if (cmd === '--profit') return showProfit();
   if (cmd === '--fetch-prices') {
     await fetchPrices();
@@ -1024,7 +1073,8 @@ async function main() {
       // 通常の指数バックオフ（最大8倍＝数分）ではなく、分単位で大きく空ける。
       let base;
       if (state.blocked && state.failStreak > 0) {
-        const mins = Math.min(30 * 2 ** (state.failStreak - 1), 240);
+        const mins = Math.min(CFG.blockCooldownMin * 2 ** (state.failStreak - 1),
+          CFG.blockCooldownMin * 8);
         base = mins * 60;
         console.error(`[${ts()}] アクセスを弾かれています。次回まで ${mins}分 待機します`);
       } else {

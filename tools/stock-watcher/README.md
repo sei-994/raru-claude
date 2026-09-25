@@ -82,6 +82,7 @@ node apple-stock.js --watch    # OK が出たら監視開始
 | `APPLE_BUY_PAGE` | `{BASE}/shop/buy-iphone/iphone-18-pro` | `--find-parts` / `--fetch-prices` が品番・定価を読むページ |
 | `BUYBACK_URL` | `https://is-checker.com/i18_stock_4.html?411` | `--fetch-prices` が買取価格を読むページ |
 | `PRICE_REFRESH_MIN` | `60` | `--watch` 中に買取価格を取り直す間隔（分）。`0` で自動更新しない |
+| `BLOCK_COOLDOWN_MIN` | `30` | 541/403/429 で弾かれたときの初回待機（分）。以降2倍ずつ、上限は8倍 |
 | `DRY_RUN` | `0` | `1` で送信せず標準出力に表示 |
 | `STATE_FILE` | `./apple-state.json` | 前回状態の保存先 |
 | `PRICES_FILE` | `./prices.json` | 表示名と買取価格の設定ファイル |
@@ -174,6 +175,7 @@ Apple は `location` を**中心とした近隣店舗**しか返しません。
 | コマンド | 用途 |
 |---|---|
 | `--doctor` | **最初にこれ。** 設定から通知まで一気通貫で自己診断 |
+| `--probe` | 1リクエストだけ投げて、いま繋がるか確認（弾かれた後の復帰確認用） |
 | `--watch` | 常駐監視 |
 | `--check` | 1回だけチェック（cron / GitHub Actions 向け。既定） |
 | `--find-parts [絞込]` | 購入ページから品番・容量・色を抽出 |
@@ -217,6 +219,8 @@ tail -f watch.log
   （2026-09-24／1日あたり約8,600リクエスト）。
   541 / 403 / 429 を受けると監視は自動で待機を 30分 → 60分 → 120分 → 240分 と延ばしますが、
   それでも復帰しない場合は `pkill -f apple-stock.js` で一度止めて、時間を置いてください。
+  **監視を動かしたままでも自動で復帰します**（ブロックが解けた回で通常間隔に戻ります）。
+  復帰したかだけ確認したいときは `--probe` を使ってください（1リクエストのみ）。
   地点を3つ指定していれば1サイクルで3リクエスト飛ぶ点にも注意（`--doctor` が減らせる場合は教えます）。
 - Apple側の仕様変更でいつ壊れてもおかしくありません。`--doctor` → `--raw` が切り分け手段です。
 - GitHub Actions 版（`.github/workflows/stock-watch.yml`）もありますが、
