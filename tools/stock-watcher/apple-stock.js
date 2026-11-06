@@ -156,6 +156,13 @@ function profitLines(parts) {
 const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const ts = () => new Date().toISOString().replace('T', ' ').slice(0, 19);
+const fmtDuration = ms => {
+  const s = Math.round(ms / 1000);
+  if (s < 60) return `${s}秒`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}分${s % 60 ? `${s % 60}秒` : ''}`;
+  return `${Math.floor(m / 60)}時間${m % 60}分`;
+};
 
 // ---------------------------------------------------------------- endpoints
 // fulfillment-messages は 541 を返すようになったとの報告があるため、
@@ -972,9 +979,19 @@ async function checkOnce(state) {
     } else if (now && was && CFG.repeatMin > 0) {
       const last = state.lastAlertAt[key] || 0;
       if (Date.now() - last > CFG.repeatMin * 60 * 1000) inStock.push({ r, repeat: true });
+    } else if (!now && was) {
+      // 在庫が消えた。どれくらい残っていたかは、監視間隔を決める材料になる
+      const lasted = prev.since ? fmtDuration(Date.now() - prev.since) : '不明';
+      console.log(`[${ts()}] 在庫切れ: ${r.store} ${label(r.part)}（在庫あり 約${lasted}）`);
     }
 
-    state.rows[key] = { inStock: now, display: r.display, at: Date.now() };
+    state.rows[key] = {
+      inStock: now,
+      display: r.display,
+      at: Date.now(),
+      // 在庫ありになった時刻。在庫ありが続く間は最初の時刻を保つ
+      since: now ? (was && prev.since ? prev.since : Date.now()) : null,
+    };
   }
 
   if (!inStock.length) {
@@ -1007,6 +1024,9 @@ async function checkOnce(state) {
     `\n${BASE}/shop/buy-iphone`
   );
   console.log(`[${ts()}] 通知送信: ${byStore.size}店舗 / ${inStock.length}件`);
+  for (const g of byStore.values()) {
+    console.log(`  ${g.store}: ${g.parts.map(label).join(', ')}${g.quote ? ` / ${g.quote}` : ''}`);
+  }
 }
 
 // --------------------------------------------------------------------- main
