@@ -101,8 +101,14 @@ function reloadPricesIfChanged() {
 }
 
 /** 品番を人が読める名前に。未登録なら品番そのまま。 */
+// prices.json に無い品番は prices.example.json の表示名を使う。
+// 監視対象を足したとき、手元の prices.json を直さなくても名前で出るように。
+const EXAMPLE_LABELS = (() => {
+  try { return JSON.parse(fs.readFileSync(path.join(__dirname, 'prices.example.json'), 'utf8')).labels || {}; }
+  catch { return {}; }
+})();
 function label(part) {
-  return PRICES.labels[part] || part;
+  return PRICES.labels[part] || EXAMPLE_LABELS[part] || part;
 }
 
 const yen = n => '¥' + Number(n).toLocaleString('ja-JP');
