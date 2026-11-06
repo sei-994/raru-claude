@@ -29,7 +29,7 @@ node apple-stock.js --watch    # OK が出たら監視開始
 | 認証 | **Cookie 不要**。User-Agent と Referer だけで通る |
 | JSON構造 | `body.stores[].partsAvailability[品番]` に `pickupDisplay` / `pickupSearchQuote` / `storePickEligible` などがある |
 | 地点 | `150-0041` の1地点で 渋谷 / 表参道 / 新宿 / 丸の内 / 銀座 / 川崎 の6店舗が返る |
-| 品番 | 256GB・512GB の8品番が `--doctor` の `[2/4]` で ✓ |
+| 品番 | iPhone 18 Pro Max の 256GB・512GB 8品番が `--doctor` の `[2/4]` で ✓（Duo の2品番は未検証） |
 | 買取価格 | is-checker.com から `--fetch-prices` で取得できる（色の区別はなし） |
 
 構造がわかった今も、**JSONの階層は決め打ちしていません**。`partsAvailability` を持つオブジェクトを再帰探索し、
@@ -133,9 +133,21 @@ node apple-stock.js --profit         # 保存済みの prices.json を表示（�
 
 ### 品番について
 
-Apple の在庫APIは商品名ではなく **`MJX54J/A` 形式の品番**で引きます。容量・色・キャリアごとに別番号です。
+Apple の在庫APIは商品名ではなく **`MK244J/A` 形式の品番**で引きます。容量・色・キャリアごとに別番号です。
 
-iPhone 18 Pro Max SIMフリー（**2026-09-18 に Apple 公式の機種ページで確認**）:
+**現在の監視対象: iPhone Duo 256GB SIMフリー**
+（7.6インチ折りたたみ / 2026-10-23 発売 / eSIM専用。256GB は2色のみ）
+
+| 品番 | 色 | 根拠 |
+|---|---|---|
+| `MK244J/A` | スターホワイト | ケーズデンキ・ヤマダの商品ページで一致 |
+| `MK254J/A` | ナイトスカイ | ヨドバシの商品ページ |
+
+小売店の表記から取った値です。**`--doctor` の `[2/4] 品番の確認` で実在を検証してください。**
+512GB / 2TB を追加するなら `--find-parts` で調べて足します。
+
+<details>
+<summary>iPhone 18 Pro Max の品番（2026-09-18 に Apple 公式の機種ページで確認）</summary>
 
 | 容量 | ブラック | シルバー | バーガンディ | グレイシャー | 定価 |
 |---|---|---|---|---|---|
@@ -144,8 +156,10 @@ iPhone 18 Pro Max SIMフリー（**2026-09-18 に Apple 公式の機種ページ
 | 1TB | `MJXE4J/A` | `MJXF4J/A` | `MJXG4J/A` | `MJXH4J/A` | ¥344,800 |
 | 2TB | `MJXJ4J/A` | `MJXK4J/A` | `MJXL4J/A` | `MJXM4J/A` | ¥449,800 |
 
-> 以前の版で512GBを「MJXA4J/A=ブラック / MJXB4J/A=シルバー」と推測していましたが、**誤り**でした
-> （MJXB4J/A は存在せず、MJXA4J/A はシルバー）。
+以前の版で512GBを「MJXA4J/A=ブラック / MJXB4J/A=シルバー」と推測していましたが、**誤り**でした
+（MJXB4J/A は存在せず、MJXA4J/A はシルバー）。
+
+</details>
 
 一覧は Apple 自身のページからいつでも引き直せます:
 

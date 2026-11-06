@@ -14,31 +14,22 @@
     "cost だけ入れて buyers が空でも動きます（その場合 --profit は買取価格なしと表示）。",
     "一覧を見るには: node apple-stock.js --profit"
   ],
-
   "labels": {
-    "MJX54J/A": "256GB ブラック",
-    "MJX64J/A": "256GB シルバー",
-    "MJX74J/A": "256GB バーガンディ",
-    "MJX84J/A": "256GB グレイシャー",
-    "MJX94J/A": "512GB ブラック",
-    "MJXA4J/A": "512GB シルバー",
-    "MJXC4J/A": "512GB バーガンディ",
-    "MJXD4J/A": "512GB グレイシャー"
+    "MK244J/A": "256GB スターホワイト",
+    "MK254J/A": "256GB ナイトスカイ"
   },
-
   "cost": {
-    "MJX54J/A": 0, "MJX64J/A": 0, "MJX74J/A": 0, "MJX84J/A": 0,
-    "MJX94J/A": 0, "MJXA4J/A": 0, "MJXC4J/A": 0, "MJXD4J/A": 0
+    "MK244J/A": 0,
+    "MK254J/A": 0
   },
-
   "buyers": {
     "じゃんぱら": {
-      "MJX54J/A": 0, "MJX64J/A": 0, "MJX74J/A": 0, "MJX84J/A": 0,
-      "MJX94J/A": 0, "MJXA4J/A": 0, "MJXC4J/A": 0, "MJXD4J/A": 0
+      "MK244J/A": 0,
+      "MK254J/A": 0
     },
     "ゲオ": {
-      "MJX54J/A": 0, "MJX64J/A": 0, "MJX74J/A": 0, "MJX84J/A": 0,
-      "MJX94J/A": 0, "MJXA4J/A": 0, "MJXC4J/A": 0, "MJXD4J/A": 0
+      "MK244J/A": 0,
+      "MK254J/A": 0
     }
   }
 }
